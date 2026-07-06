@@ -1,0 +1,159 @@
+rules_version = '2';
+
+// =====================================================================
+// SOTTO STUDIO - Reglas de seguridad de Firestore
+// Modelo de roles: alumno / profesor / direccion
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------
+    function estaAutenticado() {
+      return request.auth != null;
+    }
+
+    function usuarioActual() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function rolActual() {
+      return usuarioActual().rol;
+    }
+
+    function esAlumno() {
+      return estaAutenticado() && rolActual() == 'alumno';
+    }
+
+    function esProfesor() {
+      return estaAutenticado() && rolActual() == 'profesor';
+    }
+
+    function esDireccion() {
+      return estaAutenticado() && rolActual() == 'direccion';
+    }
+
+    function esProfesorODireccion() {
+      return esProfesor() || esDireccion();
+    }
+
+    function esPropioUsuario(uid) {
+      return estaAutenticado() && request.auth.uid == uid;
+    }
+
+    // ---------------------------------------------------------------
+    // usuarios
+    // Cada usuario lee/edita su propio documento (salvo el campo rol).
+    // Profesor y dirección pueden leer cualquier perfil de alumno
+    // para mostrar dashboards, historiales y notas.
+    // Solo dirección puede cambiar el rol de un usuario o crear
+    // usuarios con rol profesor/direccion.
+    // ---------------------------------------------------------------
+    match /usuarios/{uid} {
+      allow read: if esPropioUsuario(uid) || esProfesorODireccion();
+
+      allow create: if esPropioUsuario(uid)
+                    && request.resource.data.rol == 'alumno';
+
+      allow update: if (esPropioUsuario(uid)
+                        && request.resource.data.rol == resource.data.rol)
+                    || esDireccion();
+
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // sesionesEstudio
+    // El alumno solo crea/lee/edita SUS PROPIAS sesiones.
+    // No puede editar duracionEfectivaMs tras crearla (evita manipular
+    // el resultado una vez calculado por el cliente).
+    // Profesor y dirección: solo lectura, de cualquier alumno.
+    // ---------------------------------------------------------------
+    match /sesionesEstudio/{sesionId} {
+      allow read: if esAlumno() && resource.data.alumnoId == request.auth.uid
+                  || esProfesorODireccion();
+
+      allow create: if esAlumno()
+                    && request.resource.data.alumnoId == request.auth.uid;
+
+      allow update: if esAlumno()
+                    && resource.data.alumnoId == request.auth.uid
+                    && request.resource.data.duracionEfectivaMs == resource.data.duracionEfectivaMs
+                    && request.resource.data.duracionTotalMs == resource.data.duracionTotalMs;
+
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // modulos
+    // Creados y editados por profesores (y dirección).
+    // Lectura abierta a cualquier usuario autenticado (alumnos
+    // necesitan verlos para completar ejercicios).
+    // ---------------------------------------------------------------
+    match /modulos/{moduloId} {
+      allow read: if estaAutenticado();
+      allow create, update, delete: if esProfesorODireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // ejercicios
+    // Igual que módulos: gestión por profesor/dirección, lectura abierta.
+    // ---------------------------------------------------------------
+    match /ejercicios/{ejercicioId} {
+      allow read: if estaAutenticado();
+      allow create, update, delete: if esProfesorODireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // ejerciciosCompletados
+    // El alumno marca sus propios ejercicios como completados.
+    // Profesor/dirección: solo lectura.
+    // ---------------------------------------------------------------
+    match /ejerciciosCompletados/{registroId} {
+      allow read: if esAlumno() && resource.data.alumnoId == request.auth.uid
+                  || esProfesorODireccion();
+
+      allow create: if esAlumno()
+                    && request.resource.data.alumnoId == request.auth.uid;
+
+      allow update, delete: if false; // registro inmutable una vez creado
+    }
+
+    // ---------------------------------------------------------------
+    // notas
+    // Solo profesor/dirección escriben notas.
+    // El alumno solo puede LEER las suyas propias.
+    // Solo dirección puede cambiar el campo "estado" a "supervisada"
+    // o "corregida" (flujo de supervisión).
+    // ---------------------------------------------------------------
+    match /notas/{notaId} {
+      allow read: if esAlumno() && resource.data.alumnoId == request.auth.uid
+                  || esProfesorODireccion();
+
+      allow create: if esProfesor()
+                    && request.resource.data.profesorId == request.auth.uid
+                    && request.resource.data.estado == 'pendiente';
+
+      allow update: if esDireccion()
+                    || (esProfesor()
+                        && resource.data.profesorId == request.auth.uid
+                        && resource.data.estado == 'pendiente');
+
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // estadisticasAlumno
+    // Documento agregado, uno por alumno (doc id == alumnoId).
+    // Solo se escribe desde Cloud Functions (trigger al crear sesión),
+    // nunca directamente desde el cliente -> evita manipulación del
+    // ranking. Lectura: el propio alumno, profesor, dirección.
+    // ---------------------------------------------------------------
+    match /estadisticasAlumno/{alumnoId} {
+      allow read: if esPropioUsuario(alumnoId) || esProfesorODireccion();
+      allow write: if false; // solo Cloud Functions con Admin SDK
+    }
+  }
+}

@@ -1,0 +1,41 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Firebase — NUNCA subir claves generadas por flutterfire configure
+# a un repositorio público. Si el repo es privado puedes quitarlas
+# de aquí, pero por defecto se excluyen.
+lib/firebase_options.dart
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+macos/Runner/GoogleService-Info.plist
+
+# Plataformas (se regeneran con `flutter create .`)
+/android/.gradle/
+/ios/Pods/
+/macos/Pods/
+
+# Archivos temporales del grabador (por si alguno queda en local)
+*_tmp_sotto_studio_no_conservar*
+
+# Cloud Functions
+functions/node_modules/
+functions/lib/
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
