@@ -25,6 +25,22 @@ android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 macos/Runner/GoogleService-Info.plist
 
+# Variables de entorno / configuración local — nunca subir secretos.
+.env
+.env.*
+!.env.example
+
+# Firmas de Android/iOS/macOS — cada plataforma ya tiene su propio
+# .gitignore (android/.gitignore, ios/.gitignore, macos/.gitignore)
+# con estas reglas, pero se repiten aquí para que sean visibles al
+# auditar el repo desde la raíz.
+android/key.properties
+*.keystore
+*.jks
+*.p12
+*.pem
+*.mobileprovision
+
 # Plataformas (se regeneran con `flutter create .`)
 /android/.gradle/
 /ios/Pods/
