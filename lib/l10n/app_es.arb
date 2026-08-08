@@ -1,0 +1,125 @@
+{
+  "@@locale": "es",
+
+  "comunCancelar": "Cancelar",
+  "comunGuardar": "Guardar",
+
+  "loginEmail": "Email",
+  "loginPassword": "Contraseña",
+  "loginIniciarSesion": "Iniciar sesión",
+  "loginOlvidasteContrasena": "¿Olvidaste tu contraseña?",
+  "loginCredencialesIncorrectas": "Credenciales incorrectas.",
+  "loginRecuperarContrasenaTitulo": "Recuperar contraseña",
+  "loginEnviarEnlace": "Enviar enlace",
+  "loginEmailEnviado": "Si el email existe, te hemos enviado un enlace para restablecer la contraseña.",
+  "loginEmailError": "No se pudo enviar el email. Comprueba la dirección.",
+
+  "menuGestionCentro": "Gestión del centro",
+  "menuCursosAsignaturas": "Cursos y asignaturas",
+  "menuAlumnos": "Alumnos",
+  "menuProfesorado": "Profesorado",
+  "menuNotasPendientes": "Notas pendientes",
+  "menuAsistenciaSinMarcar": "Asistencia sin marcar",
+  "menuInformeHoras": "Informe de horas",
+  "menuInformeHorasTitulo": "Informe de horas efectivas",
+  "menuRegistroHorario": "Registro horario",
+  "menuCursoEscolar": "Curso escolar",
+  "menuDocencia": "Docencia",
+  "menuMisAsignaturas": "Mis asignaturas",
+  "menuMiEstudio": "Mi estudio",
+  "menuMiJornadaLaboral": "Mi jornada laboral",
+  "menuFicharEntradaSalida": "Fichar entrada/salida",
+  "menuHerramientas": "Herramientas",
+  "menuAfinador": "Afinador",
+  "menuMetronomo": "Metrónomo",
+  "menuCuadroHonor": "Cuadro de honor",
+  "menuCambiarContrasena": "Cambiar contraseña",
+  "menuAjustes": "Ajustes",
+  "menuModoOscuro": "Modo oscuro",
+  "menuCerrarSesion": "Cerrar sesión",
+  "menuCerrarSesionConfirmacion": "¿Seguro que quieres cerrar la sesión?",
+
+  "inicioSaludo": "Hola, {nombre}",
+  "@inicioSaludo": {
+    "placeholders": { "nombre": {} }
+  },
+  "inicioElegirSeccion": "Elige una sección desde el menú (☰) para empezar.",
+  "inicioNotasNuevas": "{count, plural, one{Tienes 1 nota nueva desde tu última visita.} other{Tienes {count} notas nuevas desde tu última visita.}}",
+  "@inicioNotasNuevas": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "inicioDiasSinEstudiar": "Llevas {dias} días sin registrar estudio.",
+  "@inicioDiasSinEstudiar": {
+    "placeholders": { "dias": { "type": "int" } }
+  },
+
+  "ajustesTitulo": "Ajustes",
+  "ajustesTamanoLetra": "Tamaño de letra",
+  "ajustesTextoEjemplo": "Este es un texto de ejemplo con el tamaño actual.",
+  "ajustesTamanoIconos": "Tamaño de los iconos de asignatura",
+  "ajustesTamanoIconosDescripcion": "Afecta a la cuadrícula de iconos de \"Cursos y asignaturas\" y \"Mis asignaturas\".",
+  "ajustesConfirmarCierreSesion": "Confirmar antes de cerrar sesión",
+  "ajustesConfirmarCierreSesionDescripcion": "Evita cierres accidentales al tocar el menú.",
+  "ajustesExportacionTitulo": "Exportación automática de fichajes",
+  "ajustesExportacionDescripcion": "Al abrir la app tras terminar un mes, se genera solo un Excel con los fichajes de ese mes en esta carpeta. Es una copia de conveniencia: el registro real siempre vive en la base de datos y nunca se puede borrar.",
+  "ajustesSinConfigurar": "Sin configurar",
+  "ajustesElegirCarpeta": "Elegir carpeta",
+  "ajustesExportarAhora": "Exportar mes anterior ahora",
+  "ajustesExportacionExito": "Exportación del mes anterior generada.",
+  "ajustesExportacionError": "No se pudo exportar: {error}",
+  "@ajustesExportacionError": {
+    "placeholders": { "error": {} }
+  },
+  "ajustesRestablecer": "Restablecer valores por defecto",
+  "ajustesIdioma": "Idioma",
+  "ajustesIdiomaCastellano": "Castellano",
+  "ajustesIdiomaCatalan": "Català",
+
+  "fichajesNoHasFichado": "Todavía no has fichado hoy",
+  "fichajesEntrada": "Entrada",
+  "fichajesSalida": "Salida",
+  "fichajesFicharEntrada": "Fichar entrada",
+  "fichajesFicharSalida": "Fichar salida",
+  "fichajesJornadaCompletada": "Jornada de hoy completada.",
+  "fichajesMiHorarioLaboral": "Mi horario laboral",
+  "fichajesSinConfigurar": "Sin configurar",
+  "fichajesTurnos": "{count} turno(s) · aviso {min} min antes",
+  "@fichajesTurnos": {
+    "placeholders": { "count": { "type": "int" }, "min": { "type": "int" } }
+  },
+  "fichajesOlvidasteFichar": "¿Olvidaste fichar otro día?",
+  "fichajesAutoinformar": "Autoinformar un día pasado sin fichar",
+  "fichajesEnviadoPendiente": "Enviado. Queda pendiente de que dirección lo valide.",
+  "fichajesMisUltimosFichajes": "Mis últimos fichajes",
+  "fichajesSinFichajes": "Sin fichajes registrados todavía.",
+  "fichajesSinTurnos": "Sin turnos configurados todavía.",
+  "fichajesPendienteValidar": "Pendiente de validar por dirección",
+  "fichajesDiaSemana": "Día de la semana",
+  "fichajesAnadirTurno": "Añadir turno",
+  "fichajesAvisarAntes": "Avisar antes de fichar (min):",
+  "fichajesEligeOlvidaste": "Elige el día que olvidaste fichar",
+  "fichajesHoraEntrada": "Hora de entrada",
+  "fichajesHoraSalida": "Hora de salida",
+  "fichajesErrorCarga": "No se pudo cargar el fichaje: {error}",
+  "@fichajesErrorCarga": {
+    "placeholders": { "error": {} }
+  },
+  "fichajesCorregido": "(corregido)",
+  "diaLunes": "Lunes",
+  "diaMartes": "Martes",
+  "diaMiercoles": "Miércoles",
+  "diaJueves": "Jueves",
+  "diaViernes": "Viernes",
+  "diaSabado": "Sábado",
+  "diaDomingo": "Domingo",
+
+  "grabarEstudioTitulo": "Registrar estudio",
+  "grabarEstudioEfectivo": "Efectivo: {tiempo}",
+  "@grabarEstudioEfectivo": {
+    "placeholders": { "tiempo": {} }
+  },
+  "grabarEstudioTotal": "Total: {tiempo}",
+  "@grabarEstudioTotal": {
+    "placeholders": { "tiempo": {} }
+  }
+}

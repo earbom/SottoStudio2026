@@ -39,3 +39,7 @@ functions/lib/
 firebase-debug.log
 firebase-debug.*.log
 .firebase/
+
+# Tests de firestore.rules
+firestore-tests/node_modules/
+firestore-tests/firestore-debug.log

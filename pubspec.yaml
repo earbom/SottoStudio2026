@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # Firebase
   firebase_core: ^3.6.0
@@ -19,15 +21,62 @@ dependencies:
   record: ^7.1.1
 
   # Utilidades
-  intl: ^0.19.0
+  intl: ^0.20.2
   provider: ^6.1.2
 
   cupertino_icons: ^1.0.8
+  fl_chart: ^1.2.0
+  table_calendar: ^3.1.3
+  audioplayers: ^6.8.1
+  flutter_local_notifications: ^22.2.0
+  excel: ^4.0.6
+  file_saver: ^0.4.0
+  timezone: ^0.11.1
+  shared_preferences: ^2.5.5
+  font_awesome_flutter: ^11.0.0
+  # Pinnado a 10.3.10: 11.0.0-11.0.3 tienen un bug conocido en Android
+  # (el módulo Android del propio paquete no aplica el plugin de
+  # Kotlin, así que GeneratedPluginRegistrant.java no encuentra
+  # FilePickerPlugin al compilar release — ver
+  # github.com/miguelpruivo/flutter_file_picker/issues/1973). Sin
+  # fecha de fix en pub.dev todavía; revisar si sube una versión
+  # nueva antes de intentar volver a `^11.x`.
+  file_picker: 10.3.10
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+  generate: true
+  assets:
+    - assets/images/
+    - assets/audio/
+
+# Icono de la app en todas las plataformas: marca "oh" del centro,
+# variante fondo negro/letras blancas (ver CLAUDE.md, LogoOh). Fuente
+# ya cuadrada y sin transparencia en assets/icon/app_icon.png
+# (assets/images/logo_oh_fondo_negro.png rellenado a cuadrado con
+# `sips`, ya que el original es 1122x804, no cuadrado). Tras cambiar
+# la imagen fuente, regenerar con `dart run flutter_launcher_icons`.
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"

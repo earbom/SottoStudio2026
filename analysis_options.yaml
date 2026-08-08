@@ -9,6 +9,15 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # build/macos/SourcePackages/checkouts/... contiene el código fuente
+  # completo de los paquetes de terceros que el gestor de paquetes de
+  # Swift descarga al compilar para macOS (incluidos sus propios tests
+  # internos, con dependencias que no son las nuestras) — no es código
+  # del proyecto, solo ensucia `flutter analyze`.
+  exclude:
+    - build/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

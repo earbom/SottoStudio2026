@@ -1,3 +1,8 @@
+import 'package:intl/intl.dart';
+import '../utils/curso_escolar.dart';
+
+final _formatoFechaDia = DateFormat('yyyy-MM-dd');
+
 enum EstadoNota { pendiente, supervisada, corregida }
 
 EstadoNota estadoNotaDesdeTexto(String texto) {
@@ -16,7 +21,8 @@ class Nota {
   final String? id;
   final String alumnoId;
   final String profesorId;
-  final String asignatura;
+  final String asignaturaId;
+  final String criterioId; // referencia a criteriosEvaluacion/{id}: define el peso
   final double valor; // 0-10
   final String comentario;
   final DateTime fecha;
@@ -26,7 +32,8 @@ class Nota {
     this.id,
     required this.alumnoId,
     required this.profesorId,
-    required this.asignatura,
+    required this.asignaturaId,
+    required this.criterioId,
     required this.valor,
     required this.comentario,
     required this.fecha,
@@ -38,7 +45,8 @@ class Nota {
       id: id,
       alumnoId: data['alumnoId'] ?? '',
       profesorId: data['profesorId'] ?? '',
-      asignatura: data['asignatura'] ?? '',
+      asignaturaId: data['asignaturaId'] ?? '',
+      criterioId: data['criterioId'] ?? '',
       valor: (data['valor'] as num?)?.toDouble() ?? 0,
       comentario: data['comentario'] ?? '',
       fecha: DateTime.tryParse(data['fecha'] ?? '') ?? DateTime.now(),
@@ -50,10 +58,19 @@ class Nota {
     return {
       'alumnoId': alumnoId,
       'profesorId': profesorId,
-      'asignatura': asignatura,
+      'asignaturaId': asignaturaId,
+      'criterioId': criterioId,
       'valor': valor,
       'comentario': comentario,
       'fecha': fecha.toIso8601String(),
+      // Derivado de 'fecha', solo para que firestore.rules pueda
+      // comprobar sustituciones (ver Sustitucion) sin parsear fechas.
+      'fechaDia': _formatoFechaDia.format(fecha),
+      // Igual que fechaDia: derivado de 'fecha', no es un campo propio
+      // del modelo Dart. Permite a las reglas saber a qué matrícula
+      // corresponde esta nota (matriculas/{alumnoId}_{asignaturaId}_
+      // {cursoEscolar}) sin consultar configuracion/centro.
+      'cursoEscolar': cursoEscolarDeFecha(fecha),
       'estado': estado.name,
     };
   }

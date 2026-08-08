@@ -8,6 +8,7 @@ class SesionEstudio {
   final String alumnoId;
   final TipoSesion tipo;
   final String? instrumento;
+  final String? asignaturaId; // null = práctica libre, no ligada a asignatura
   final DateTime fechaInicio;
   final DateTime? fechaFin;
   final int duracionTotalMs;
@@ -19,6 +20,7 @@ class SesionEstudio {
     required this.alumnoId,
     required this.tipo,
     this.instrumento,
+    this.asignaturaId,
     required this.fechaInicio,
     this.fechaFin,
     required this.duracionTotalMs,
@@ -32,6 +34,7 @@ class SesionEstudio {
       alumnoId: data['alumnoId'] ?? '',
       tipo: tipoSesionDesdeTexto(data['tipo'] ?? 'instrumento'),
       instrumento: data['instrumento'],
+      asignaturaId: data['asignaturaId'],
       fechaInicio: DateTime.tryParse(data['fechaInicio'] ?? '') ?? DateTime.now(),
       fechaFin: data['fechaFin'] != null
           ? DateTime.tryParse(data['fechaFin'])
@@ -47,6 +50,7 @@ class SesionEstudio {
       'alumnoId': alumnoId,
       'tipo': tipo.name,
       'instrumento': instrumento,
+      'asignaturaId': asignaturaId,
       'fechaInicio': fechaInicio.toIso8601String(),
       'fechaFin': fechaFin?.toIso8601String(),
       'duracionTotalMs': duracionTotalMs,

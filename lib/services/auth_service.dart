@@ -1,11 +1,14 @@
+import 'dart:math';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/usuario.dart';
 
 /// Gestiona login, registro y sesión con Firebase Auth.
-/// El documento en `usuarios/{uid}` se crea SIEMPRE con rol 'alumno'
-/// desde el cliente (ver firestore.rules) — subir a profesor/direccion
-/// se hace manualmente desde la consola de Firebase o con Admin SDK.
+/// El documento en `usuarios/{uid}` se crea SIEMPRE con permisos
+/// {alumno} desde el autorregistro (ver firestore.rules) — subir a
+/// profesor/direccion se hace manualmente desde la consola de Firebase
+/// o con Admin SDK.
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -21,12 +24,30 @@ class AuthService {
     final tieneMayuscula = RegExp(r'[A-Z]').hasMatch(password);
     final tieneMinuscula = RegExp(r'[a-z]').hasMatch(password);
     final tieneDigito = RegExp(r'\d').hasMatch(password);
-    final tieneSimbolo = RegExp(r'[@#$%^&+=!]').hasMatch(password);
+    final tieneSimbolo = RegExp(r'[@#$%^&+=!_-]').hasMatch(password);
     return tieneLongitud &&
         tieneMayuscula &&
         tieneMinuscula &&
         tieneDigito &&
         tieneSimbolo;
+  }
+
+  /// Genera una contraseña temporal que cumple `contrasenaValida`, para
+  /// mostrarla una vez a dirección y que la releve al alumno/familia.
+  String generarPasswordTemporal() {
+    const mayus = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // sin O/I ambiguas
+    const minus = 'abcdefghijkmnpqrstuvwxyz';
+    const digitos = '23456789';
+    const simbolos = '@#\$%^&+=!_-';
+    final rand = Random.secure();
+    String elegir(String c) => c[rand.nextInt(c.length)];
+    final chars = [elegir(mayus), elegir(minus), elegir(digitos), elegir(simbolos)];
+    const todos = mayus + minus + digitos + simbolos;
+    for (var i = 0; i < 6; i++) {
+      chars.add(elegir(todos));
+    }
+    chars.shuffle(rand);
+    return chars.join();
   }
 
   Future<Usuario> registrar({
@@ -51,7 +72,7 @@ class AuthService {
       uid: uid,
       nombre: nombre,
       email: email,
-      rol: Rol.alumno,
+      permisos: {Permiso.alumno},
       instrumento: instrumento,
       centroId: centroId,
       createdAt: DateTime.now(),
@@ -61,11 +82,113 @@ class AuthService {
     return usuario;
   }
 
+  /// Alta ágil de alumno o profesor desde el panel de dirección. No hay
+  /// Cloud Functions desplegadas (falta plan Blaze, ver CLAUDE.md), así
+  /// que para crear la cuenta de Firebase Auth sin cerrar la sesión de
+  /// dirección se usa una FirebaseApp secundaria efímera solo para el
+  /// alta en Auth; el documento de Firestore se escribe con la app
+  /// PRIMARIA, que sigue autenticada como dirección (firestore.rules
+  /// permite a dirección crear cualquier doc en `usuarios`).
+  ///
+  /// Workaround temporal: cuando el centro contrate el plan Blaze,
+  /// migrar esto a una Cloud Function invocable con Admin SDK.
+  Future<String> _crearUsuarioConPermiso({
+    required String nombre,
+    required String email,
+    required Permiso permiso,
+    String? instrumento,
+    String? centroId,
+  }) async {
+    final passwordTemporal = generarPasswordTemporal();
+    final nombreApp = 'tempAdmin_${DateTime.now().microsecondsSinceEpoch}';
+    final appSecundaria = await Firebase.initializeApp(
+      name: nombreApp,
+      options: Firebase.app().options,
+    );
+    try {
+      final authSecundario = FirebaseAuth.instanceFor(app: appSecundaria);
+      final credencial = await authSecundario.createUserWithEmailAndPassword(
+        email: email,
+        password: passwordTemporal,
+      );
+      final uid = credencial.user!.uid;
+      final usuario = Usuario(
+        uid: uid,
+        nombre: nombre,
+        email: email,
+        permisos: {permiso},
+        instrumento: instrumento,
+        centroId: centroId,
+        createdAt: DateTime.now(),
+      );
+      await _db.collection('usuarios').doc(uid).set(usuario.toMap());
+      await authSecundario.signOut();
+      return passwordTemporal;
+    } finally {
+      await appSecundaria.delete();
+    }
+  }
+
+  Future<String> crearAlumno({
+    required String nombre,
+    required String email,
+    String? instrumento,
+    String? centroId,
+  }) {
+    return _crearUsuarioConPermiso(
+      nombre: nombre,
+      email: email,
+      permiso: Permiso.alumno,
+      instrumento: instrumento,
+      centroId: centroId,
+    );
+  }
+
+  Future<String> crearProfesor({
+    required String nombre,
+    required String email,
+    String? centroId,
+  }) {
+    return _crearUsuarioConPermiso(
+      nombre: nombre,
+      email: email,
+      permiso: Permiso.profesor,
+      centroId: centroId,
+    );
+  }
+
   Future<void> iniciarSesion({
     required String email,
     required String password,
   }) async {
     await _auth.signInWithEmailAndPassword(email: email, password: password);
+  }
+
+  /// Envía el email de restablecimiento de contraseña estándar de
+  /// Firebase Auth (enlace a una página alojada por Firebase, sin
+  /// backend propio necesario). Accesible desde la pantalla de login.
+  Future<void> enviarEmailDeRecuperacion(String email) {
+    return _auth.sendPasswordResetEmail(email: email.trim());
+  }
+
+  /// Cambia la contraseña del usuario ya autenticado. Requiere
+  /// reautenticar con la contraseña actual porque Firebase exige un
+  /// login "reciente" para operaciones sensibles como esta.
+  Future<void> cambiarPassword({
+    required String passwordActual,
+    required String passwordNueva,
+  }) async {
+    if (!contrasenaValida(passwordNueva)) {
+      throw Exception(
+          'La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula, dígito y símbolo.');
+    }
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      throw Exception('No hay sesión activa.');
+    }
+    final credencial = EmailAuthProvider.credential(email: user.email!, password: passwordActual);
+    await user.reauthenticateWithCredential(credencial);
+    await user.updatePassword(passwordNueva);
   }
 
   Future<void> cerrarSesion() async {

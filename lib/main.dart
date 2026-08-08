@@ -1,19 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+
+import 'l10n/app_localizations.dart';
 
 import 'firebase_options.dart'; // generado por `flutterfire configure`
 import 'services/auth_service.dart';
-import 'models/usuario.dart';
+import 'services/tema_service.dart';
+import 'services/ajustes_service.dart';
+import 'services/navegacion_observer.dart';
 import 'screens/comunes/login_screen.dart';
-import 'screens/alumno/dashboard_alumno_screen.dart';
-import 'screens/profesor/dashboard_profesor_screen.dart';
-import 'screens/direccion/informe_direccion_screen.dart';
+import 'screens/comunes/home_shell.dart';
+import 'tema.dart';
+
+final _navigatorKey = GlobalKey<NavigatorState>();
+final _profundidadNavegacion = ValueNotifier<int>(0);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const SottoStudioApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => TemaService()),
+        ChangeNotifierProvider(create: (_) => AjustesService()),
+      ],
+      child: const SottoStudioApp(),
+    ),
+  );
 }
 
 class SottoStudioApp extends StatelessWidget {
@@ -21,13 +37,56 @@ class SottoStudioApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tema = context.watch<TemaService>();
+    final ajustes = context.watch<AjustesService>();
     return MaterialApp(
+      navigatorKey: _navigatorKey,
+      navigatorObservers: [NavegacionObserver(_profundidadNavegacion)],
       title: 'Sotto Studio',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFFE07A2C), // naranja acento
-        scaffoldBackgroundColor: const Color(0xFFF5F1E8), // crema
+      locale: ajustes.idioma,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: temaClaro,
+      darkTheme: temaOscuro,
+      themeMode: tema.modo,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(ajustes.escalaFuente),
+        ),
+        child: Stack(
+          children: [
+            child!,
+            ValueListenableBuilder<int>(
+              valueListenable: _profundidadNavegacion,
+              builder: (context, profundidad, _) {
+                if (profundidad <= 0) return const SizedBox.shrink();
+                return Positioned(
+                  left: 16,
+                  bottom: 16,
+                  child: SafeArea(
+                    // Sin `tooltip:`: este botón vive en el Stack del
+                    // `builder:` de MaterialApp, fuera del Overlay que
+                    // crea el Navigator interno — un Tooltip aquí
+                    // lanza "No Overlay widget found" al no encontrar
+                    // un ancestro Overlay.
+                    child: FloatingActionButton.small(
+                      heroTag: 'volverAlMenu',
+                      onPressed: () =>
+                          _navigatorKey.currentState?.popUntil((r) => r.isFirst),
+                      child: const Icon(Icons.home_outlined),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
       home: const _RaizAutenticacion(),
     );
@@ -55,21 +114,13 @@ class _RaizAutenticacion extends StatelessWidget {
           return const LoginScreen();
         }
 
-        return FutureBuilder<Usuario?>(
+        return FutureBuilder(
           future: authService.obtenerPerfil(user.uid),
           builder: (context, snapshotPerfil) {
             if (!snapshotPerfil.hasData) {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
-            final perfil = snapshotPerfil.data!;
-            switch (perfil.rol) {
-              case Rol.profesor:
-                return const DashboardProfesorScreen();
-              case Rol.direccion:
-                return InformeDireccionScreen();
-              case Rol.alumno:
-                return const DashboardAlumnoScreen();
-            }
+            return HomeShell(perfil: snapshotPerfil.data!);
           },
         );
       },

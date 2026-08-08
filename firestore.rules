@@ -2,7 +2,9 @@ rules_version = '2';
 
 // =====================================================================
 // SOTTO STUDIO - Reglas de seguridad de Firestore
-// Modelo de roles: alumno / profesor / direccion
+// Modelo de permisos: un usuario puede tener uno o varios de
+// {alumno, profesor, direccion} simultáneamente (p.ej. una directora
+// que también da clase). Ver CLAUDE.md, sección de permisos.
 // =====================================================================
 
 service cloud.firestore {
@@ -19,20 +21,20 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
-    function rolActual() {
-      return usuarioActual().rol;
+    function tienePermiso(permiso) {
+      return estaAutenticado() && permiso in usuarioActual().permisos;
     }
 
     function esAlumno() {
-      return estaAutenticado() && rolActual() == 'alumno';
+      return tienePermiso('alumno');
     }
 
     function esProfesor() {
-      return estaAutenticado() && rolActual() == 'profesor';
+      return tienePermiso('profesor');
     }
 
     function esDireccion() {
-      return estaAutenticado() && rolActual() == 'direccion';
+      return tienePermiso('direccion');
     }
 
     function esProfesorODireccion() {
@@ -43,22 +45,51 @@ service cloud.firestore {
       return estaAutenticado() && request.auth.uid == uid;
     }
 
+    function esProfesorDeAsignatura(asignaturaId) {
+      return esProfesor() && request.auth.uid in
+          get(/databases/$(database)/documents/asignaturas/$(asignaturaId)).data.profesorIds;
+    }
+
+    // Un profesor solo puede gestionar (notas/asistencia) los alumnos
+    // que dirección le ha asignado explícitamente en la matrícula
+    // (matriculas.profesorId) — no todos los alumnos de la asignatura,
+    // porque puede haber varios profesores con alumnos distintos.
+    // cursoEscolar identifica la matrícula del año correspondiente (ver
+    // CLAUDE.md, discriminación por curso escolar): asistencias/notas
+    // lo llevan denormalizado (derivado de su propia fecha, igual que
+    // fechaDia) precisamente para poder construir aquí el ID correcto.
+    function esProfesorAsignadoAlAlumno(alumnoId, asignaturaId, cursoEscolar) {
+      return esProfesor() && request.auth.uid ==
+          get(/databases/$(database)/documents/matriculas/$(alumnoId + '_' + asignaturaId + '_' + cursoEscolar)).data.profesorId;
+    }
+
+    // Sustitución temporal: un profesor puede gestionar CUALQUIER
+    // alumno de la asignatura para un día concreto si dirección le ha
+    // dado de alta como sustituto ese día (ver colección sustituciones,
+    // ID determinista `${asignaturaId}_${profesorId}_${fecha}`).
+    function tieneSustitucion(asignaturaId, fecha) {
+      return esProfesor() && exists(
+          /databases/$(database)/documents/sustituciones/$(asignaturaId + '_' + request.auth.uid + '_' + fecha));
+    }
+
     // ---------------------------------------------------------------
     // usuarios
-    // Cada usuario lee/edita su propio documento (salvo el campo rol).
+    // Cada usuario lee/edita su propio documento (salvo permisos).
     // Profesor y dirección pueden leer cualquier perfil de alumno
     // para mostrar dashboards, historiales y notas.
-    // Solo dirección puede cambiar el rol de un usuario o crear
-    // usuarios con rol profesor/direccion.
+    // Dirección puede crear cuentas de alumno de forma ágil (alta
+    // rápida desde el panel de centro; ver AuthService.crearAlumno,
+    // que usa una FirebaseApp secundaria para no cerrar su propia
+    // sesión) y cambiar permisos o eliminar cuentas.
     // ---------------------------------------------------------------
     match /usuarios/{uid} {
       allow read: if esPropioUsuario(uid) || esProfesorODireccion();
 
-      allow create: if esPropioUsuario(uid)
-                    && request.resource.data.rol == 'alumno';
+      allow create: if (esPropioUsuario(uid) && request.resource.data.permisos == ['alumno'])
+                    || esDireccion();
 
       allow update: if (esPropioUsuario(uid)
-                        && request.resource.data.rol == resource.data.rol)
+                        && request.resource.data.permisos == resource.data.permisos)
                     || esDireccion();
 
       allow delete: if esDireccion();
@@ -67,21 +98,40 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     // sesionesEstudio
     // El alumno solo crea/lee/edita SUS PROPIAS sesiones.
-    // No puede editar duracionEfectivaMs tras crearla (evita manipular
-    // el resultado una vez calculado por el cliente).
+    // No puede editar duracionEfectivaMs/duracionTotalMs/asignaturaId
+    // tras crearla (evita manipular el resultado o re-etiquetar la
+    // sesión a otra asignatura después de guardada).
     // Profesor y dirección: solo lectura, de cualquier alumno.
     // ---------------------------------------------------------------
     match /sesionesEstudio/{sesionId} {
-      allow read: if esAlumno() && resource.data.alumnoId == request.auth.uid
+      // La segunda condición de alumno (tipo == 'instrumento') es una
+      // excepción DELIBERADA para el Cuadro de Honor (ranking global de
+      // horas de instrumento, visible también para alumnos con nombres
+      // — a diferencia del ranking por asignatura, que sigue siendo
+      // solo para profesor/dirección, ver CLAUDE.md punto 14). Sin
+      // Cloud Functions desplegadas, el cliente necesita poder leer las
+      // sesiones de OTROS alumnos para agregarlas; se acota a
+      // 'instrumento' para no exponer también el estudio teórico.
+      allow read: if (esAlumno() && resource.data.alumnoId == request.auth.uid)
+                  || (esAlumno() && resource.data.tipo == 'instrumento')
                   || esProfesorODireccion();
 
+      // Ya no existe la práctica libre sin asignatura: toda sesión
+      // nueva debe apuntar a una asignatura que dirección haya marcado
+      // explícitamente con permiteGrabarEstudio == true (normalmente
+      // solo asignaturas de instrumento — ver CLAUDE.md). Las sesiones
+      // antiguas con asignaturaId == null (antes de este cambio) no se
+      // tocan, esta condición solo aplica a creaciones nuevas.
       allow create: if esAlumno()
-                    && request.resource.data.alumnoId == request.auth.uid;
+                    && request.resource.data.alumnoId == request.auth.uid
+                    && request.resource.data.get('asignaturaId', null) is string
+                    && get(/databases/$(database)/documents/asignaturas/$(request.resource.data.asignaturaId)).data.get('permiteGrabarEstudio', false) == true;
 
       allow update: if esAlumno()
                     && resource.data.alumnoId == request.auth.uid
                     && request.resource.data.duracionEfectivaMs == resource.data.duracionEfectivaMs
-                    && request.resource.data.duracionTotalMs == resource.data.duracionTotalMs;
+                    && request.resource.data.duracionTotalMs == resource.data.duracionTotalMs
+                    && request.resource.data.asignaturaId == resource.data.asignaturaId;
 
       allow delete: if esDireccion();
     }
@@ -123,7 +173,9 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------
     // notas
-    // Solo profesor/dirección escriben notas.
+    // Solo el profesor asignado a ESE alumno en esa asignatura (o con
+    // una sustitución activa ese día) crea notas — no cualquier
+    // profesor de la asignatura, ver esProfesorAsignadoAlAlumno.
     // El alumno solo puede LEER las suyas propias.
     // Solo dirección puede cambiar el campo "estado" a "supervisada"
     // o "corregida" (flujo de supervisión).
@@ -134,12 +186,16 @@ service cloud.firestore {
 
       allow create: if esProfesor()
                     && request.resource.data.profesorId == request.auth.uid
-                    && request.resource.data.estado == 'pendiente';
+                    && request.resource.data.estado == 'pendiente'
+                    && request.resource.data.valor >= 0 && request.resource.data.valor <= 10
+                    && (esProfesorAsignadoAlAlumno(request.resource.data.alumnoId, request.resource.data.asignaturaId, request.resource.data.cursoEscolar)
+                        || tieneSustitucion(request.resource.data.asignaturaId, request.resource.data.fechaDia));
 
       allow update: if esDireccion()
                     || (esProfesor()
                         && resource.data.profesorId == request.auth.uid
-                        && resource.data.estado == 'pendiente');
+                        && resource.data.estado == 'pendiente'
+                        && request.resource.data.valor >= 0 && request.resource.data.valor <= 10);
 
       allow delete: if esDireccion();
     }
@@ -154,6 +210,179 @@ service cloud.firestore {
     match /estadisticasAlumno/{alumnoId} {
       allow read: if esPropioUsuario(alumnoId) || esProfesorODireccion();
       allow write: if false; // solo Cloud Functions con Admin SDK
+    }
+
+    // ---------------------------------------------------------------
+    // configuracion
+    // Documento único configuracion/centro con el curso escolar activo
+    // (p.ej. "2026/2027") y el historial de cursos anteriores. Lectura
+    // abierta (todas las pantallas necesitan saber qué curso está
+    // activo para filtrar); solo dirección lo cambia. Nunca se borra.
+    // ---------------------------------------------------------------
+    match /configuracion/{docId} {
+      allow read: if estaAutenticado();
+      allow create, update: if esDireccion();
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
+    // cursos
+    // Control total de dirección (crear/editar/eliminar). Lectura
+    // abierta a cualquier usuario autenticado, como modulos/ejercicios.
+    // ---------------------------------------------------------------
+    match /cursos/{cursoId} {
+      allow read: if estaAutenticado();
+      // get(..., 0) en vez de acceso directo: el objetivo de horas vivía
+      // antes en asignaturas y se ha movido aquí (ver CLAUDE.md) — los
+      // cursos creados antes de ese cambio no tienen el campo, y
+      // acceder directo lanzaría un error de evaluación
+      // (permission-denied) al editarlos por primera vez tras el cambio.
+      allow create, update: if esDireccion()
+                            && request.resource.data.get('horasObjetivoMensual', 0) >= 0;
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // asignaturas
+    // Igual que cursos: solo dirección gestiona la estructura
+    // (nombre, profesorIds). Profesor solo lee. El horario semanal
+    // (diasSemana) va en la matrícula, no aquí (ver CLAUDE.md punto 7).
+    // ---------------------------------------------------------------
+    match /asignaturas/{asignaturaId} {
+      allow read: if estaAutenticado();
+      allow create, update: if esDireccion();
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // criteriosEvaluacion
+    // Define, por asignatura, qué actividades/controles son
+    // puntuables y qué peso (%) tienen en la nota final. Solo
+    // dirección los crea/edita/elimina; lectura abierta (profesor los
+    // necesita para poder elegir criterio al poner una nota, alumno
+    // para ver a qué corresponde cada nota suya).
+    // ---------------------------------------------------------------
+    match /criteriosEvaluacion/{criterioId} {
+      allow read: if estaAutenticado();
+      allow create, update: if esDireccion()
+                            && request.resource.data.peso >= 0 && request.resource.data.peso <= 100;
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // matriculas
+    // Solo dirección matricula/desmatricula alumnos en asignaturas.
+    // El alumno lee sus propias matrículas; el profesor lee las de
+    // las asignaturas donde está asignado.
+    // ---------------------------------------------------------------
+    match /matriculas/{matriculaId} {
+      // resource == null cuando el doc no existe (p.ej. get() por ID
+      // determinista antes de matricular): sin ese chequeo, acceder a
+      // resource.data más abajo lanza un error de evaluación, que
+      // Firestore reporta como permission-denied en vez de "no existe".
+      allow read: if esDireccion()
+                  || (estaAutenticado() && resource == null)
+                  || (esAlumno() && resource.data.alumnoId == request.auth.uid)
+                  || esProfesorDeAsignatura(resource.data.asignaturaId);
+      allow create, update, delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // asistencias
+    // Marcada por el profesor asignado a ESE alumno (o con sustitución
+    // activa ese día) o dirección. El alumno solo lee las suyas. En
+    // update no se puede cambiar a qué alumno/asignatura/fecha
+    // corresponde el registro (solo el valor asistio).
+    // ---------------------------------------------------------------
+    match /asistencias/{asistenciaId} {
+      // resource == null: ver comentario en matriculas — el calendario
+      // consulta días sin asistencia marcada todavía (caso normal).
+      allow read: if esDireccion()
+                  || (estaAutenticado() && resource == null)
+                  || (esAlumno() && resource.data.alumnoId == request.auth.uid)
+                  || esProfesorDeAsignatura(resource.data.asignaturaId);
+
+      allow create: if esDireccion()
+                    || esProfesorAsignadoAlAlumno(request.resource.data.alumnoId, request.resource.data.asignaturaId, request.resource.data.cursoEscolar)
+                    || tieneSustitucion(request.resource.data.asignaturaId, request.resource.data.fecha);
+
+      allow update: if esDireccion()
+                    || ((esProfesorAsignadoAlAlumno(resource.data.alumnoId, resource.data.asignaturaId, resource.data.cursoEscolar)
+                         || tieneSustitucion(resource.data.asignaturaId, resource.data.fecha))
+                        && request.resource.data.alumnoId == resource.data.alumnoId
+                        && request.resource.data.asignaturaId == resource.data.asignaturaId
+                        && request.resource.data.fecha == resource.data.fecha
+                        && request.resource.data.cursoEscolar == resource.data.cursoEscolar);
+
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // sustituciones
+    // Concede a un profesor acceso temporal a TODOS los alumnos de una
+    // asignatura para un día concreto (cubre bajas/sustituciones). Solo
+    // dirección las crea/edita/elimina, desde la ficha de la asignatura.
+    // ---------------------------------------------------------------
+    match /sustituciones/{sustitucionId} {
+      allow read: if estaAutenticado();
+      allow create, update, delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // horariosLaborales
+    // Horario semanal recurrente de UN trabajador (profesor o
+    // dirección) para el registro de jornada (Art. 34.9 ET): el
+    // propio trabajador lo configura (qué días trabaja y a qué hora),
+    // dirección puede verlo/editarlo de todos para supervisión. Doc
+    // id == uid del trabajador.
+    // ---------------------------------------------------------------
+    match /horariosLaborales/{empleadoId} {
+      allow read: if esDireccion() || esPropioUsuario(empleadoId);
+      allow create, update: if esDireccion()
+                            || (esPropioUsuario(empleadoId) && esProfesorODireccion());
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // marcajes
+    // Fichaje de entrada/salida (Art. 34.9 ET, RD-ley 8/2019): un doc
+    // por trabajador y día (ID determinista `${empleadoId}_${fecha}`).
+    // El propio trabajador ficha su entrada (create, con horaSalida a
+    // null) y más tarde su salida (update, solo de null a un valor —
+    // no puede reescribir una vez fichada, ni tocar horaEntrada). Solo
+    // dirección puede corregir libremente (con auditoría vía
+    // corregidoPor/corregidoEn en el cliente). No se permite borrar
+    // NUNCA: la ley obliga a conservar el registro 4 años.
+    // ---------------------------------------------------------------
+    match /marcajes/{marcajeId} {
+      // resource == null: caso normal la primera vez que se abre
+      // "Fichar" en el día (todavía no existe el doc de hoy) — ver
+      // mismo comentario en matriculas/asistencias.
+      allow read: if esDireccion()
+                  || (estaAutenticado() && resource == null)
+                  || (esProfesorODireccion() && resource.data.empleadoId == request.auth.uid);
+
+      // Dos formas de crear un marcaje propio: el fichaje normal del
+      // día (horaSalida aún null) o el autoinforme de un olvido en un
+      // día pasado sin ningún marcaje (entrada Y salida ya puestas,
+      // pendienteValidacion true hasta que dirección lo revise — ver
+      // CLAUDE.md).
+      allow create: if esProfesorODireccion()
+                    && request.resource.data.empleadoId == request.auth.uid
+                    && (request.resource.data.horaSalida == null
+                        || (request.resource.data.get('pendienteValidacion', false) == true
+                            && request.resource.data.horaSalida != null));
+
+      allow update: if esDireccion()
+                    || (esProfesorODireccion()
+                        && resource.data.empleadoId == request.auth.uid
+                        && request.resource.data.empleadoId == resource.data.empleadoId
+                        && request.resource.data.fecha == resource.data.fecha
+                        && request.resource.data.horaEntrada == resource.data.horaEntrada
+                        && resource.data.horaSalida == null
+                        && request.resource.data.horaSalida != null);
+
+      allow delete: if false;
     }
   }
 }
