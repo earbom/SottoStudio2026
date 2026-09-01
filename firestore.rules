@@ -37,6 +37,13 @@ service cloud.firestore {
       return tienePermiso('direccion');
     }
 
+    // Cuenta especial única (Edgar), fijada a mano por consola de
+    // Firebase junto a los otros 3 permisos — ver CLAUDE.md, modo
+    // desarrollador. Da acceso al panel de incidencias.
+    function esDesarrollador() {
+      return tienePermiso('desarrollador');
+    }
+
     function esProfesorODireccion() {
       return esProfesor() || esDireccion();
     }
@@ -45,22 +52,27 @@ service cloud.firestore {
       return estaAutenticado() && request.auth.uid == uid;
     }
 
-    function esProfesorDeAsignatura(asignaturaId) {
-      return esProfesor() && request.auth.uid in
-          get(/databases/$(database)/documents/asignaturas/$(asignaturaId)).data.profesorIds;
-    }
-
-    // Un profesor solo puede gestionar (notas/asistencia) los alumnos
-    // que dirección le ha asignado explícitamente en la matrícula
-    // (matriculas.profesorId) — no todos los alumnos de la asignatura,
-    // porque puede haber varios profesores con alumnos distintos.
-    // cursoEscolar identifica la matrícula del año correspondiente (ver
-    // CLAUDE.md, discriminación por curso escolar): asistencias/notas
-    // lo llevan denormalizado (derivado de su propia fecha, igual que
-    // fechaDia) precisamente para poder construir aquí el ID correcto.
-    function esProfesorAsignadoAlAlumno(alumnoId, asignaturaId, cursoEscolar) {
-      return esProfesor() && request.auth.uid ==
-          get(/databases/$(database)/documents/matriculas/$(alumnoId + '_' + asignaturaId + '_' + cursoEscolar)).data.profesorId;
+    // Generalización cross-curso (ver CLAUDE.md, permiso cruzado entre
+    // cursos por nombre de asignatura): cualquier profesor que figure
+    // en profesorIds de CUALQUIER asignatura que comparta nombre (vía
+    // gruposAsignatura/{nombreNormalizado}, mantenido en cliente sin
+    // Cloud Functions — ver DbService._sincronizarGrupoAsignatura)
+    // puede gestionar notas/asistencia/matrículas de ESTA asignatura
+    // concreta, sin depender de estar en profesorIds de este documento
+    // en particular ni de un pin por alumno (matriculas.profesorId
+    // pasa a ser puramente informativo). Sustituye a las antiguas
+    // esProfesorDeAsignatura/esProfesorAsignadoAlAlumno.
+    //
+    // Usa .get(clave, default) en cada paso para fallar en `false`,
+    // nunca lanzar un error de evaluación, si una asignatura todavía no
+    // tiene nombreNormalizado (no migrada) o el grupo aún no existe —
+    // mismo espíritu de "fallar cerrado sin excepción" que el chequeo
+    // de resource == null (ver más abajo).
+    function esProfesorDeAsignaturaPorNombre(asignaturaId) {
+      let asig = get(/databases/$(database)/documents/asignaturas/$(asignaturaId)).data;
+      return esProfesor() && asig.get('nombreNormalizado', '') != ''
+          && request.auth.uid in
+             get(/databases/$(database)/documents/gruposAsignatura/$(asig.nombreNormalizado)).data.get('profesorIds', []);
     }
 
     // Sustitución temporal: un profesor puede gestionar CUALQUIER
@@ -97,41 +109,69 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------
     // sesionesEstudio
-    // El alumno solo crea/lee/edita SUS PROPIAS sesiones.
-    // No puede editar duracionEfectivaMs/duracionTotalMs/asignaturaId
-    // tras crearla (evita manipular el resultado o re-etiquetar la
-    // sesión a otra asignatura después de guardada).
-    // Profesor y dirección: solo lectura, de cualquier alumno.
+    // El alumno crea/lee/edita SUS PROPIAS sesiones grabadas con
+    // micrófono. Un profesor también puede CREAR/CORREGIR sesiones
+    // tipo 'teorico' en nombre de un alumno (total MENSUAL anotado a
+    // mano de un cuaderno, ver CLAUDE.md) para asignaturas NO
+    // instrumentales — no puede reetiquetar alumno/asignatura/tipo. La
+    // corrección posterior (update) la puede hacer CUALQUIER profesor
+    // de esa asignatura (permiso cruzado por nombre, no solo quien la
+    // creó — igual que el create), para que un compañero pueda
+    // arreglar un total equivocado. Profesor y dirección: lectura de
+    // cualquier alumno.
     // ---------------------------------------------------------------
     match /sesionesEstudio/{sesionId} {
-      // La segunda condición de alumno (tipo == 'instrumento') es una
-      // excepción DELIBERADA para el Cuadro de Honor (ranking global de
-      // horas de instrumento, visible también para alumnos con nombres
-      // — a diferencia del ranking por asignatura, que sigue siendo
-      // solo para profesor/dirección, ver CLAUDE.md punto 14). Sin
-      // Cloud Functions desplegadas, el cliente necesita poder leer las
-      // sesiones de OTROS alumnos para agregarlas; se acota a
-      // 'instrumento' para no exponer también el estudio teórico.
+      // La segunda condición de alumno (tipo in [instrumento, teorico])
+      // es una excepción DELIBERADA para el Cuadro de Honor (ranking
+      // global/por bloques de horas, visible también para alumnos con
+      // nombres — a diferencia del ranking por asignatura, que sigue
+      // siendo solo para profesor/dirección, ver CLAUDE.md puntos 14 y
+      // 27). Sin Cloud Functions desplegadas, el cliente necesita poder
+      // leer las sesiones de OTROS alumnos para agregarlas. Ampliado de
+      // solo 'instrumento' a también 'teorico' para el ranking por
+      // bloques de asignatura (ver CLAUDE.md) — abierto a TODAS las
+      // sesiones teóricas sin condicionarlo a si la asignatura tiene
+      // objetivo configurado: eso es una decisión de presentación, no
+      // de seguridad.
       allow read: if (esAlumno() && resource.data.alumnoId == request.auth.uid)
-                  || (esAlumno() && resource.data.tipo == 'instrumento')
+                  || (esAlumno() && resource.data.tipo in ['instrumento', 'teorico'])
                   || esProfesorODireccion();
 
-      // Ya no existe la práctica libre sin asignatura: toda sesión
-      // nueva debe apuntar a una asignatura que dirección haya marcado
-      // explícitamente con permiteGrabarEstudio == true (normalmente
-      // solo asignaturas de instrumento — ver CLAUDE.md). Las sesiones
-      // antiguas con asignaturaId == null (antes de este cambio) no se
-      // tocan, esta condición solo aplica a creaciones nuevas.
-      allow create: if esAlumno()
-                    && request.resource.data.alumnoId == request.auth.uid
-                    && request.resource.data.get('asignaturaId', null) is string
-                    && get(/databases/$(database)/documents/asignaturas/$(request.resource.data.asignaturaId)).data.get('permiteGrabarEstudio', false) == true;
+      // Dos formas de crear una sesión nueva (ya no existe la práctica
+      // libre sin asignatura):
+      // - El propio alumno graba con micrófono: debe apuntar a una
+      //   asignatura que dirección haya marcado explícitamente con
+      //   permiteGrabarEstudio == true (normalmente de instrumento).
+      // - Un profesor anota a mano las horas semanales de un alumno en
+      //   una asignatura NO instrumental (armonía, lenguaje musical...):
+      //   tipo debe ser 'teorico' y el profesor debe pasar el permiso
+      //   cruzado por nombre de asignatura (ver CLAUDE.md punto 51) —
+      //   sin exigir permiteGrabarEstudio, que es justamente lo
+      //   contrario de para qué es esta rama.
+      // Las sesiones antiguas con asignaturaId == null (antes del punto
+      // 41) no se tocan, esta condición solo aplica a creaciones nuevas.
+      allow create: if (esAlumno()
+                        && request.resource.data.alumnoId == request.auth.uid
+                        && request.resource.data.get('asignaturaId', null) is string
+                        && get(/databases/$(database)/documents/asignaturas/$(request.resource.data.asignaturaId)).data.get('permiteGrabarEstudio', false) == true)
+                    || (esProfesor()
+                        && request.resource.data.get('registradoPorProfesorId', '') == request.auth.uid
+                        && request.resource.data.tipo == 'teorico'
+                        && request.resource.data.get('asignaturaId', null) is string
+                        && esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId));
 
-      allow update: if esAlumno()
-                    && resource.data.alumnoId == request.auth.uid
-                    && request.resource.data.duracionEfectivaMs == resource.data.duracionEfectivaMs
-                    && request.resource.data.duracionTotalMs == resource.data.duracionTotalMs
-                    && request.resource.data.asignaturaId == resource.data.asignaturaId;
+      allow update: if (esAlumno()
+                        && resource.data.alumnoId == request.auth.uid
+                        && request.resource.data.duracionEfectivaMs == resource.data.duracionEfectivaMs
+                        && request.resource.data.duracionTotalMs == resource.data.duracionTotalMs
+                        && request.resource.data.asignaturaId == resource.data.asignaturaId)
+                    || (esProfesor()
+                        && resource.data.get('registradoPorProfesorId', '') != ''
+                        && request.resource.data.alumnoId == resource.data.alumnoId
+                        && request.resource.data.asignaturaId == resource.data.asignaturaId
+                        && request.resource.data.tipo == resource.data.tipo
+                        && request.resource.data.registradoPorProfesorId == request.auth.uid
+                        && esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId));
 
       allow delete: if esDireccion();
     }
@@ -173,9 +213,10 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------
     // notas
-    // Solo el profesor asignado a ESE alumno en esa asignatura (o con
-    // una sustitución activa ese día) crea notas — no cualquier
-    // profesor de la asignatura, ver esProfesorAsignadoAlAlumno.
+    // Cualquier profesor de la asignatura (de cualquier curso que
+    // comparta nombre, ver esProfesorDeAsignaturaPorNombre — permiso
+    // cruzado entre cursos, CLAUDE.md) crea notas, sin depender de un
+    // pin por alumno; también con una sustitución activa ese día.
     // El alumno solo puede LEER las suyas propias.
     // Solo dirección puede cambiar el campo "estado" a "supervisada"
     // o "corregida" (flujo de supervisión).
@@ -188,7 +229,7 @@ service cloud.firestore {
                     && request.resource.data.profesorId == request.auth.uid
                     && request.resource.data.estado == 'pendiente'
                     && request.resource.data.valor >= 0 && request.resource.data.valor <= 10
-                    && (esProfesorAsignadoAlAlumno(request.resource.data.alumnoId, request.resource.data.asignaturaId, request.resource.data.cursoEscolar)
+                    && (esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId)
                         || tieneSustitucion(request.resource.data.asignaturaId, request.resource.data.fechaDia));
 
       allow update: if esDireccion()
@@ -250,8 +291,28 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     match /asignaturas/{asignaturaId} {
       allow read: if estaAutenticado();
-      allow create, update: if esDireccion();
+      // get(..., 0) por si el documento es de antes de este campo (ver
+      // CLAUDE.md, objetivo de horas por asignatura) — mismo criterio
+      // que `cursos.horasObjetivoMensual` más arriba.
+      allow create, update: if esDireccion()
+                            && request.resource.data.get('horasObjetivoSemanal', 0) >= 0
+                            && request.resource.data.get('horasObjetivoMensual', 0) >= 0;
       allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // gruposAsignatura
+    // Agregado de profesorIds por nombre normalizado de asignatura
+    // (across-curso), mantenido en cliente al crear/editar una
+    // asignatura o (des)asignar un profesor (ver
+    // DbService._sincronizarGrupoAsignatura, sin Cloud Functions).
+    // Solo lo escribe dirección (vía ese código); lectura abierta,
+    // la necesita esProfesorDeAsignaturaPorNombre() para cualquier
+    // profesor.
+    // ---------------------------------------------------------------
+    match /gruposAsignatura/{nombreNormalizado} {
+      allow read: if estaAutenticado();
+      allow write: if esDireccion();
     }
 
     // ---------------------------------------------------------------
@@ -283,16 +344,17 @@ service cloud.firestore {
       allow read: if esDireccion()
                   || (estaAutenticado() && resource == null)
                   || (esAlumno() && resource.data.alumnoId == request.auth.uid)
-                  || esProfesorDeAsignatura(resource.data.asignaturaId);
+                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId);
       allow create, update, delete: if esDireccion();
     }
 
     // ---------------------------------------------------------------
     // asistencias
-    // Marcada por el profesor asignado a ESE alumno (o con sustitución
-    // activa ese día) o dirección. El alumno solo lee las suyas. En
-    // update no se puede cambiar a qué alumno/asignatura/fecha
-    // corresponde el registro (solo el valor asistio).
+    // Marcada por cualquier profesor de la asignatura (cross-curso,
+    // ver esProfesorDeAsignaturaPorNombre), con sustitución activa ese
+    // día, o dirección. El alumno solo lee las suyas. En update no se
+    // puede cambiar a qué alumno/asignatura/fecha corresponde el
+    // registro (solo el valor asistio).
     // ---------------------------------------------------------------
     match /asistencias/{asistenciaId} {
       // resource == null: ver comentario en matriculas — el calendario
@@ -300,14 +362,14 @@ service cloud.firestore {
       allow read: if esDireccion()
                   || (estaAutenticado() && resource == null)
                   || (esAlumno() && resource.data.alumnoId == request.auth.uid)
-                  || esProfesorDeAsignatura(resource.data.asignaturaId);
+                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId);
 
       allow create: if esDireccion()
-                    || esProfesorAsignadoAlAlumno(request.resource.data.alumnoId, request.resource.data.asignaturaId, request.resource.data.cursoEscolar)
+                    || esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId)
                     || tieneSustitucion(request.resource.data.asignaturaId, request.resource.data.fecha);
 
       allow update: if esDireccion()
-                    || ((esProfesorAsignadoAlAlumno(resource.data.alumnoId, resource.data.asignaturaId, resource.data.cursoEscolar)
+                    || ((esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId)
                          || tieneSustitucion(resource.data.asignaturaId, resource.data.fecha))
                         && request.resource.data.alumnoId == resource.data.alumnoId
                         && request.resource.data.asignaturaId == resource.data.asignaturaId
@@ -383,6 +445,55 @@ service cloud.firestore {
                         && request.resource.data.horaSalida != null);
 
       allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
+    // incidencias
+    // Cualquier usuario autenticado puede crear un reporte (problema o
+    // sugerencia) y leer/comentar SOLO los suyos. El desarrollador
+    // (permiso `desarrollador`, cuenta única fijada manualmente por
+    // consola — ver CLAUDE.md) puede leer y gestionar TODOS: cambiar
+    // `estado` a resuelto/pendiente y añadir comentarios. Un autor
+    // NUNCA puede resolver su propio ticket (no puede tocar `estado`),
+    // solo comentar. `comentarios` es una lista embebida (no
+    // subcolección, ver convención del resto de la app) — el
+    // `size()` +0/+1 en `update` acota cada escritura a "sin cambios"
+    // o "un comentario añadido"; no valida elemento a elemento que los
+    // comentarios previos no se hayan alterado (Firestore rules no
+    // tiene bucles/comparación de prefijos de lista) — mismo nivel de
+    // confianza ya asumido hoy, sin guardas, para
+    // `asignaturas.profesorIds` con arrayUnion.
+    // ---------------------------------------------------------------
+    match /incidencias/{incidenciaId} {
+      allow read: if esDesarrollador()
+                  || (estaAutenticado() && resource.data.autorId == request.auth.uid);
+
+      allow create: if estaAutenticado()
+                    && request.resource.data.autorId == request.auth.uid
+                    && request.resource.data.tipo in ['problema', 'sugerencia']
+                    && request.resource.data.estado == 'pendiente'
+                    && request.resource.data.comentarios.size() == 0;
+
+      allow update: if (esDesarrollador()
+                        && request.resource.data.autorId == resource.data.autorId
+                        && request.resource.data.autorNombre == resource.data.autorNombre
+                        && request.resource.data.tipo == resource.data.tipo
+                        && request.resource.data.descripcion == resource.data.descripcion
+                        && request.resource.data.fecha == resource.data.fecha
+                        && request.resource.data.estado in ['pendiente', 'resuelto']
+                        && (request.resource.data.comentarios.size() == resource.data.comentarios.size()
+                            || request.resource.data.comentarios.size() == resource.data.comentarios.size() + 1))
+                    || (estaAutenticado()
+                        && resource.data.autorId == request.auth.uid
+                        && request.resource.data.autorId == resource.data.autorId
+                        && request.resource.data.autorNombre == resource.data.autorNombre
+                        && request.resource.data.tipo == resource.data.tipo
+                        && request.resource.data.descripcion == resource.data.descripcion
+                        && request.resource.data.fecha == resource.data.fecha
+                        && request.resource.data.estado == resource.data.estado
+                        && request.resource.data.comentarios.size() == resource.data.comentarios.size() + 1);
+
+      allow delete: if esDesarrollador();
     }
   }
 }

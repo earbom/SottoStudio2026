@@ -29,7 +29,7 @@ class ProfesoradoScreen extends StatelessWidget {
               return ListTile(
                 leading: const CircleAvatar(child: Icon(Icons.person_outline)),
                 title: Text(profesor.nombre),
-                subtitle: Text(profesor.email),
+                subtitle: Text(profesor.email ?? ''),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.push(
                   context,

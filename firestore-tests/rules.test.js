@@ -64,6 +64,7 @@ describe('usuarios', () => {
         .set({ nombre: 'Alumno Uno', email: 'a1@test.com', permisos: ['direccion'], createdAt: new Date().toISOString() })
     );
   });
+
 });
 
 describe('sesionesEstudio', () => {
@@ -139,10 +140,12 @@ describe('sesionesEstudio', () => {
     );
   });
 
-  it('un alumno NO puede leer la sesión TEÓRICA de otro alumno', async () => {
-    // Nota: una sesión de tipo 'instrumento' de otro alumno SÍ es
-    // legible — excepción deliberada para el Cuadro de Honor, ver
-    // describe('sesionesEstudio: Cuadro de Honor visible para alumnos').
+  it('un alumno SÍ puede leer una sesión TEÓRICA de otro alumno (ranking por bloques, ampliación deliberada)', async () => {
+    // Antes esto fallaba: la excepción de lectura para alumno solo
+    // cubría tipo 'instrumento' (Cuadro de Honor de instrumento, ver
+    // CLAUDE.md punto 27). Ampliada también a 'teorico' para el
+    // ranking por bloques de asignatura (ver CLAUDE.md) — misma
+    // decisión de privacidad para ambos tipos.
     let sesionId;
     await conDatosDePrueba(async (db) => {
       const ref = await db.collection('sesionesEstudio').add({
@@ -155,7 +158,7 @@ describe('sesionesEstudio', () => {
       sesionId = ref.id;
     });
     const alumno = testEnv.authenticatedContext('alumno1').firestore();
-    await assertFails(alumno.collection('sesionesEstudio').doc(sesionId).get());
+    await assertSucceeds(alumno.collection('sesionesEstudio').doc(sesionId).get());
   });
 });
 
@@ -167,9 +170,18 @@ describe('notas: asignación por alumno y sustituciones', () => {
       await db.collection('asignaturas').doc('guitarra').set({
         cursoId: 'curso1',
         nombre: 'Guitarra',
+        nombreNormalizado: 'guitarra',
         profesorIds: ['profesorA', 'profesorB'],
         createdAt: new Date().toISOString(),
         createdBy: 'dir1',
+      });
+      // Ver CLAUDE.md, permiso cruzado entre cursos: la regla de
+      // creación de notas/asistencias ya no consulta profesorIds del
+      // propio documento ni matriculas.profesorId, sino este grupo
+      // agregado por nombre (mantenido en cliente, ver
+      // DbService._sincronizarGrupoAsignatura).
+      await db.collection('gruposAsignatura').doc('guitarra').set({
+        profesorIds: ['profesorA', 'profesorB'],
       });
       await db.collection('matriculas').doc('alumno1_guitarra_2026-2027').set({
         alumnoId: 'alumno1',
@@ -203,9 +215,13 @@ describe('notas: asignación por alumno y sustituciones', () => {
     );
   });
 
-  it('un profesor de la MISMA asignatura pero sin ese alumno asignado NO puede puntuarlo', async () => {
+  it('un profesor de la MISMA asignatura SÍ puede puntuar aunque matriculas.profesorId apunte a otro (permiso cruzado por asignatura, ya no un pin por alumno)', async () => {
+    // Relajación deliberada (ver CLAUDE.md): matriculas.profesorId pasó
+    // a ser informativo. Antes este test comprobaba lo contrario — no
+    // volver a restringir esto "simplificando" el código sin releer
+    // esa decisión.
     const profesorB = testEnv.authenticatedContext('profesorB').firestore();
-    await assertFails(
+    await assertSucceeds(
       profesorB.collection('notas').add({ ...notaBase, profesorId: 'profesorB' })
     );
   });
@@ -243,6 +259,134 @@ describe('notas: asignación por alumno y sustituciones', () => {
     });
     const alumno2 = testEnv.authenticatedContext('alumno2').firestore();
     await assertFails(alumno2.collection('notas').doc(notaId).get());
+  });
+
+  it('un profesor puede leer TODAS las notas de una asignatura filtrando solo por asignaturaId, aunque no tenga a ese alumno asignado (cuadrícula de notas)', async () => {
+    // La regla de lectura de `notas` para profesor/dirección
+    // (esProfesorODireccion()) no depende de resource.data, así que
+    // esta lectura amplia es una decisión de negocio deliberada, no
+    // un descuido — ver CLAUDE.md punto 25 y DbService.notasDeAsignatura.
+    await conDatosDePrueba(async (db) => {
+      await db.collection('notas').add({ ...notaBase, profesorId: 'profesorA' });
+    });
+    const profesorB = testEnv.authenticatedContext('profesorB').firestore();
+    await assertSucceeds(
+      profesorB.collection('notas').where('asignaturaId', '==', 'guitarra').get()
+    );
+  });
+});
+
+describe('permiso cruzado entre cursos por nombre de asignatura (gruposAsignatura)', () => {
+  // Dos documentos `Asignatura` distintos (cursos distintos) que
+  // comparten nombre "Piano": profesorC solo figura en profesorIds del
+  // doc de curso1, profesorD solo en el de curso2. Vía
+  // gruposAsignatura/piano (mantenido en cliente, ver
+  // DbService._sincronizarGrupoAsignatura) ambos deben poder
+  // gestionar alumnos de CUALQUIERA de los dos documentos.
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('profesorC').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorD').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorE').set({ permisos: ['profesor'] });
+      await db.collection('asignaturas').doc('piano_curso1').set({
+        cursoId: 'curso1',
+        nombre: 'Piano',
+        nombreNormalizado: 'piano',
+        profesorIds: ['profesorC'],
+      });
+      await db.collection('asignaturas').doc('piano_curso2').set({
+        cursoId: 'curso2',
+        nombre: 'Piano',
+        nombreNormalizado: 'piano',
+        profesorIds: ['profesorD'],
+      });
+      await db.collection('gruposAsignatura').doc('piano').set({
+        profesorIds: ['profesorC', 'profesorD'],
+      });
+      await db.collection('asignaturas').doc('violin').set({
+        cursoId: 'curso3',
+        nombre: 'Violín',
+        nombreNormalizado: 'violin',
+        profesorIds: ['profesorE'],
+      });
+      await db.collection('gruposAsignatura').doc('violin').set({
+        profesorIds: ['profesorE'],
+      });
+      // Asignatura creada ANTES de la migración: sin nombreNormalizado
+      // (ver CLAUDE.md, DbService.migrarGruposAsignatura) y sin grupo.
+      await db.collection('asignaturas').doc('canto_no_migrada').set({
+        cursoId: 'curso4',
+        nombre: 'Canto',
+        profesorIds: ['profesorF'],
+      });
+      await db.collection('usuarios').doc('profesorF').set({ permisos: ['profesor'] });
+      await db.collection('matriculas').doc('alumno3_piano_curso2_2026-2027').set({
+        alumnoId: 'alumno3',
+        asignaturaId: 'piano_curso2',
+        cursoId: 'curso2',
+        cursoEscolar: '2026-2027',
+        activa: true,
+        fechaAlta: new Date().toISOString(),
+        diasSemana: [2],
+        profesorId: '',
+      });
+    });
+  });
+
+  const notaPiano = {
+    alumnoId: 'alumno3',
+    asignaturaId: 'piano_curso2',
+    criterioId: 'c1',
+    valor: 8,
+    comentario: '',
+    fecha: new Date().toISOString(),
+    fechaDia: '2026-01-01',
+    cursoEscolar: '2026-2027',
+    estado: 'pendiente',
+  };
+
+  it('un profesor de OTRO curso con el mismo NOMBRE de asignatura SÍ puede puntuar/marcar asistencia', async () => {
+    const profesorC = testEnv.authenticatedContext('profesorC').firestore();
+    await assertSucceeds(
+      profesorC.collection('notas').add({ ...notaPiano, profesorId: 'profesorC' })
+    );
+    await assertSucceeds(
+      profesorC.collection('asistencias').doc('alumno3_piano_curso2_2026-01-01').set({
+        alumnoId: 'alumno3',
+        asignaturaId: 'piano_curso2',
+        fecha: '2026-01-01',
+        cursoEscolar: '2026-2027',
+        asistio: true,
+        retraso: false,
+        marcadaPor: 'profesorC',
+      })
+    );
+  });
+
+  it('un profesor de una asignatura con NOMBRE DISTINTO sigue sin poder puntuar (control negativo)', async () => {
+    const profesorE = testEnv.authenticatedContext('profesorE').firestore();
+    await assertFails(
+      profesorE.collection('notas').add({ ...notaPiano, profesorId: 'profesorE' })
+    );
+  });
+
+  it('una asignatura sin nombreNormalizado (no migrada) deniega sin lanzar error de evaluación', async () => {
+    const profesorF = testEnv.authenticatedContext('profesorF').firestore();
+    await assertFails(
+      profesorF.collection('notas').add({
+        ...notaPiano,
+        asignaturaId: 'canto_no_migrada',
+        profesorId: 'profesorF',
+      })
+    );
+  });
+
+  it('un profesor puede leer matriculas de un curso donde no está en profesorIds de ESE doc pero sí en el grupo por nombre', async () => {
+    const profesorC = testEnv.authenticatedContext('profesorC').firestore();
+    const doc = await assertSucceeds(
+      profesorC.collection('matriculas').doc('alumno3_piano_curso2_2026-2027').get()
+    );
+    assert.equal(doc.exists, true);
   });
 });
 
@@ -313,6 +457,38 @@ describe('cursos y asignaturas: control total de dirección', () => {
     const alumno = testEnv.authenticatedContext('alumno1').firestore();
     await assertFails(
       alumno.collection('cursos').add({ nombre: 'Reglado 1', createdAt: new Date().toISOString(), createdBy: 'alumno1' })
+    );
+  });
+
+  it('dirección puede crear una asignatura con objetivo de horas válido', async () => {
+    const direccion = testEnv.authenticatedContext('dir1').firestore();
+    await assertSucceeds(
+      direccion.collection('asignaturas').add({
+        cursoId: 'curso1',
+        nombre: 'Armonía',
+        nombreNormalizado: 'armonía',
+        profesorIds: [],
+        createdAt: new Date().toISOString(),
+        createdBy: 'dir1',
+        horasObjetivoSemanal: 2,
+        horasObjetivoMensual: 8,
+      })
+    );
+  });
+
+  it('rechaza horasObjetivoSemanal/Mensual negativo en asignaturas', async () => {
+    const direccion = testEnv.authenticatedContext('dir1').firestore();
+    await assertFails(
+      direccion.collection('asignaturas').add({
+        cursoId: 'curso1',
+        nombre: 'Armonía',
+        nombreNormalizado: 'armonía',
+        profesorIds: [],
+        createdAt: new Date().toISOString(),
+        createdBy: 'dir1',
+        horasObjetivoSemanal: -1,
+        horasObjetivoMensual: 8,
+      })
     );
   });
 });
@@ -402,6 +578,65 @@ describe('matriculas: ID distingue curso escolar', () => {
   });
 });
 
+describe('matriculas: consulta por asignaturaId es la única forma segura para profesor', () => {
+  // Documenta una trampa real (ver CLAUDE.md punto 25): la regla de
+  // lectura de `matriculas` para profesor depende de
+  // `resource.data.asignaturaId` (esProfesorDeAsignaturaPorNombre, la
+  // generalización cross-curso de la antigua esProfesorDeAsignatura —
+  // ver CLAUDE.md, permiso cruzado entre cursos). Una consulta que no
+  // fije ese campo como igualdad exacta —por ejemplo, filtrando solo
+  // por alumnoId, como parecería natural para "mis alumnos"— no es
+  // "provably compliant" y Firestore la rechaza ENTERA, aunque cada
+  // documento individual fuera legible por separado. Por eso
+  // DbService.alumnosDeProfesorAgrupados /
+  // matriculasDeAlumnoImpartidasPorProfesor iteran por asignaturas del
+  // profesor en vez de consultar matriculas por alumnoId directamente
+  // — este test evita que alguien "simplifique" ese código de vuelta a
+  // la forma que rompe.
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('asignaturas').doc('guitarra').set({
+        cursoId: 'curso1',
+        nombre: 'Guitarra',
+        nombreNormalizado: 'guitarra',
+        profesorIds: ['profesorA'],
+      });
+      await db.collection('gruposAsignatura').doc('guitarra').set({
+        profesorIds: ['profesorA'],
+      });
+      await db.collection('matriculas').doc('alumno1_guitarra_2025-2026').set({
+        alumnoId: 'alumno1',
+        asignaturaId: 'guitarra',
+        cursoId: 'curso1',
+        cursoEscolar: '2025-2026',
+        activa: true,
+        profesorId: 'profesorA',
+        fechaAlta: new Date().toISOString(),
+      });
+    });
+  });
+
+  it('un profesor NO puede consultar matriculas filtrando solo por alumnoId', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertFails(
+      profesorA.collection('matriculas').where('alumnoId', '==', 'alumno1').get()
+    );
+  });
+
+  it('un profesor SÍ puede consultar matriculas filtrando por asignaturaId', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(
+      profesorA
+        .collection('matriculas')
+        .where('asignaturaId', '==', 'guitarra')
+        .where('cursoEscolar', '==', '2025-2026')
+        .where('activa', '==', true)
+        .get()
+    );
+  });
+});
+
 describe('sesionesEstudio: Cuadro de Honor visible para alumnos', () => {
   beforeEach(async () => {
     await conDatosDePrueba(async (db) => {
@@ -426,7 +661,12 @@ describe('sesionesEstudio: Cuadro de Honor visible para alumnos', () => {
     await assertSucceeds(alumno1.collection('sesionesEstudio').doc(sesionId).get());
   });
 
-  it('un alumno NO puede leer una sesión de estudio TEÓRICO de otro alumno', async () => {
+  it('un alumno SÍ puede leer una sesión de estudio TEÓRICO de otro alumno (ranking por bloques)', async () => {
+    // Relajación deliberada (ver CLAUDE.md): antes solo 'instrumento'
+    // era legible por otros alumnos. Ampliado a 'teorico' para que el
+    // ranking por bloques de asignatura (horas manuales de teoría)
+    // también sea visible para todos, igual que el de instrumento —
+    // no volver a restringir esto sin releer esa decisión.
     let sesionId;
     await conDatosDePrueba(async (db) => {
       const ref = await db.collection('sesionesEstudio').add({
@@ -439,7 +679,7 @@ describe('sesionesEstudio: Cuadro de Honor visible para alumnos', () => {
       sesionId = ref.id;
     });
     const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
-    await assertFails(alumno1.collection('sesionesEstudio').doc(sesionId).get());
+    await assertSucceeds(alumno1.collection('sesionesEstudio').doc(sesionId).get());
   });
 
   it('un alumno puede consultar la colección entera filtrando por tipo == instrumento (query real del Cuadro de Honor)', async () => {
@@ -460,6 +700,150 @@ describe('sesionesEstudio: Cuadro de Honor visible para alumnos', () => {
     // la propia consulta, no solo como `continue` tras leer.
     await assertFails(alumno1.collection('sesionesEstudio').get());
     await assertSucceeds(alumno1.collection('sesionesEstudio').where('tipo', '==', 'instrumento').get());
+  });
+
+  it('un alumno puede consultar filtrando tipo in [instrumento, teorico] (query real del ranking por bloques)', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('sesionesEstudio').add({
+        alumnoId: 'alumno2',
+        tipo: 'teorico',
+        fechaInicio: new Date().toISOString(),
+        duracionTotalMs: 1000,
+        duracionEfectivaMs: 800,
+      });
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(
+      alumno1.collection('sesionesEstudio').where('tipo', 'in', ['instrumento', 'teorico']).get()
+    );
+  });
+
+  it('un alumno SIGUE pudiendo consultar filtrando solo tipo == instrumento tras ampliar la regla', async () => {
+    // Regresión: comprueba que ampliar la regla de lectura a 'teorico'
+    // no rompió el filtro más estrecho que ya usaba cuadroDeHonorMensual().
+    await conDatosDePrueba(async (db) => {
+      await db.collection('sesionesEstudio').add({
+        alumnoId: 'alumno2',
+        tipo: 'instrumento',
+        fechaInicio: new Date().toISOString(),
+        duracionTotalMs: 1000,
+        duracionEfectivaMs: 800,
+      });
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(alumno1.collection('sesionesEstudio').where('tipo', '==', 'instrumento').get());
+  });
+});
+
+describe('sesionesEstudio: registro manual de horas de teoría por el profesor', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('alumno1').set({ permisos: ['alumno'] });
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorB').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorC').set({ permisos: ['profesor'] });
+      await db.collection('asignaturas').doc('armonia').set({
+        cursoId: 'curso1',
+        nombre: 'Armonía',
+        nombreNormalizado: 'armonía',
+        profesorIds: ['profesorA'],
+        permiteGrabarEstudio: false,
+      });
+      // Mismo nombre de asignatura ("Armonía"), curso distinto:
+      // profesorC solo figura aquí, no en 'armonia' — comprueba que la
+      // corrección de un total mensual funciona cross-curso (mismo
+      // criterio que el permiso de creación), no solo para quien creó
+      // la entrada originalmente.
+      await db.collection('asignaturas').doc('armonia_curso2').set({
+        cursoId: 'curso2',
+        nombre: 'Armonía',
+        nombreNormalizado: 'armonía',
+        profesorIds: ['profesorC'],
+        permiteGrabarEstudio: false,
+      });
+      await db.collection('gruposAsignatura').doc('armonía').set({
+        profesorIds: ['profesorA', 'profesorC'],
+      });
+      await db.collection('sesionesEstudio').doc('mensual_alumno1_armonia').set({
+        ...semana,
+        registradoPorProfesorId: 'profesorA',
+      });
+    });
+  });
+
+  const semana = {
+    alumnoId: 'alumno1',
+    tipo: 'teorico',
+    asignaturaId: 'armonia',
+    fechaInicio: new Date('2026-01-05').toISOString(),
+    fechaFin: new Date('2026-01-11').toISOString(),
+    duracionTotalMs: 10800000,
+    duracionEfectivaMs: 10800000,
+  };
+
+  it('un profesor de la asignatura puede registrar horas manuales tipo teorico para un alumno (cross-curso incluido)', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(
+      profesorA.collection('sesionesEstudio').add({ ...semana, registradoPorProfesorId: 'profesorA' })
+    );
+  });
+
+  it('un profesor NO puede registrar horas manuales marcando tipo instrumento', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertFails(
+      profesorA.collection('sesionesEstudio').add({
+        ...semana,
+        tipo: 'instrumento',
+        registradoPorProfesorId: 'profesorA',
+      })
+    );
+  });
+
+  it('un profesor que NO enseña esa asignatura no puede registrar horas manuales', async () => {
+    const profesorB = testEnv.authenticatedContext('profesorB').firestore();
+    await assertFails(
+      profesorB.collection('sesionesEstudio').add({ ...semana, registradoPorProfesorId: 'profesorB' })
+    );
+  });
+
+  it('un alumno no puede usar el camino de registro manual (esa rama exige esProfesor())', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno.collection('sesionesEstudio').add({ ...semana, registradoPorProfesorId: 'profesorA' })
+    );
+  });
+
+  it('el propio profesor que registró el total puede corregirlo', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(
+      profesorA.collection('sesionesEstudio').doc('mensual_alumno1_armonia').update({
+        duracionTotalMs: 14400000,
+        duracionEfectivaMs: 14400000,
+        registradoPorProfesorId: 'profesorA',
+      })
+    );
+  });
+
+  it('otro profesor de la MISMA asignatura, en un curso distinto, también puede corregir el total (cross-curso)', async () => {
+    const profesorC = testEnv.authenticatedContext('profesorC').firestore();
+    await assertSucceeds(
+      profesorC.collection('sesionesEstudio').doc('mensual_alumno1_armonia').update({
+        duracionTotalMs: 18000000,
+        duracionEfectivaMs: 18000000,
+        registradoPorProfesorId: 'profesorC',
+      })
+    );
+  });
+
+  it('un profesor que NO enseña esa asignatura no puede corregir el total de otro', async () => {
+    const profesorB = testEnv.authenticatedContext('profesorB').firestore();
+    await assertFails(
+      profesorB.collection('sesionesEstudio').doc('mensual_alumno1_armonia').update({
+        duracionTotalMs: 18000000,
+        duracionEfectivaMs: 18000000,
+        registradoPorProfesorId: 'profesorB',
+      })
+    );
   });
 });
 
@@ -688,5 +1072,183 @@ describe('regresión: leer un documento que aún no existe no debe fallar', () =
     const alumno = testEnv.authenticatedContext('alumno1').firestore();
     const doc = await assertSucceeds(alumno.collection('matriculas').doc('alumno1_inexistente').get());
     assert.equal(doc.exists, false);
+  });
+});
+
+describe('incidencias (modo desarrollador)', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('alumno1').set({ permisos: ['alumno'] });
+      await db.collection('usuarios').doc('alumno2').set({ permisos: ['alumno'] });
+      await db.collection('usuarios').doc('dev1').set({ permisos: ['alumno', 'profesor', 'direccion', 'desarrollador'] });
+    });
+  });
+
+  const incidenciaBase = {
+    autorId: 'alumno1',
+    autorNombre: 'Alumno Uno',
+    tipo: 'problema',
+    descripcion: 'Se cierra la app al grabar',
+    estado: 'pendiente',
+    fecha: new Date().toISOString(),
+    comentarios: [],
+  };
+
+  it('un usuario autenticado puede crear su propia incidencia', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(alumno.collection('incidencias').add(incidenciaBase));
+  });
+
+  it('NO puede crearla ya con estado distinto de pendiente', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno.collection('incidencias').add({ ...incidenciaBase, estado: 'resuelto' })
+    );
+  });
+
+  it('NO puede crearla con un tipo inválido', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno.collection('incidencias').add({ ...incidenciaBase, tipo: 'otra_cosa' })
+    );
+  });
+
+  it('NO puede crearla suplantando a otro autorId', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno.collection('incidencias').add({ ...incidenciaBase, autorId: 'alumno2' })
+    );
+  });
+
+  it('NO puede crearla con comentarios ya rellenos desde el inicio', async () => {
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno.collection('incidencias').add({
+        ...incidenciaBase,
+        comentarios: [{ autorId: 'alumno1', autorNombre: 'Alumno Uno', texto: 'x', fecha: new Date().toISOString() }],
+      })
+    );
+  });
+
+  it('el autor puede leer su propia incidencia; otro alumno NO puede leerla', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(alumno1.collection('incidencias').doc(id).get());
+    const alumno2 = testEnv.authenticatedContext('alumno2').firestore();
+    await assertFails(alumno2.collection('incidencias').doc(id).get());
+  });
+
+  it('el desarrollador puede leer la incidencia de cualquiera', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const dev = testEnv.authenticatedContext('dev1').firestore();
+    await assertSucceeds(dev.collection('incidencias').doc(id).get());
+  });
+
+  it('el autor puede añadir un comentario sin tocar el estado', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(
+      alumno1.collection('incidencias').doc(id).update({
+        comentarios: [{ autorId: 'alumno1', autorNombre: 'Alumno Uno', texto: 'una aclaración', fecha: new Date().toISOString() }],
+      })
+    );
+  });
+
+  it('el autor NO puede cambiar el estado de su propia incidencia (no autorresolverse)', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno1.collection('incidencias').doc(id).update({ estado: 'resuelto' })
+    );
+  });
+
+  it('el autor NO puede modificar tipo/descripcion/autorId tras crearla', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(
+      alumno1.collection('incidencias').doc(id).update({ descripcion: 'otro texto' })
+    );
+  });
+
+  it('el desarrollador puede cambiar el estado de la incidencia de otro a resuelto', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const dev = testEnv.authenticatedContext('dev1').firestore();
+    await assertSucceeds(
+      dev.collection('incidencias').doc(id).update({ estado: 'resuelto' })
+    );
+  });
+
+  it('el desarrollador puede añadir un comentario a la incidencia de otro', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const dev = testEnv.authenticatedContext('dev1').firestore();
+    await assertSucceeds(
+      dev.collection('incidencias').doc(id).update({
+        comentarios: [{ autorId: 'dev1', autorNombre: 'Desarrollador', texto: 'ya lo miro', fecha: new Date().toISOString() }],
+      })
+    );
+  });
+
+  it('el desarrollador NO puede escribir un estado inválido', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const dev = testEnv.authenticatedContext('dev1').firestore();
+    await assertFails(
+      dev.collection('incidencias').doc(id).update({ estado: 'en_curso' })
+    );
+  });
+
+  it('un tercero que no es ni autor ni desarrollador NO puede actualizar', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno2 = testEnv.authenticatedContext('alumno2').firestore();
+    await assertFails(
+      alumno2.collection('incidencias').doc(id).update({ estado: 'resuelto' })
+    );
+  });
+
+  it('solo el desarrollador puede borrar una incidencia', async () => {
+    let id;
+    await conDatosDePrueba(async (db) => {
+      const ref = await db.collection('incidencias').add(incidenciaBase);
+      id = ref.id;
+    });
+    const alumno1 = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(alumno1.collection('incidencias').doc(id).delete());
+    const dev = testEnv.authenticatedContext('dev1').firestore();
+    await assertSucceeds(dev.collection('incidencias').doc(id).delete());
   });
 });

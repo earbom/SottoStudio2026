@@ -77,7 +77,8 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
                   subtitle: const Text(
                       'Solo para instrumento: el alumno podrá grabar sesiones de práctica en esta asignatura.'),
                   value: permiteGrabarEstudio,
-                  onChanged: (v) => setStateDialog(() => permiteGrabarEstudio = v),
+                  onChanged: (v) =>
+                      setStateDialog(() => permiteGrabarEstudio = v),
                 ),
                 const SizedBox(height: 4),
                 const Text('Icono'),
@@ -328,10 +329,12 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
                                 icon: const Icon(Icons.more_vert, size: 18),
                                 tooltip: 'Opciones',
                                 onSelected: (v) {
-                                  if (v == 'editar')
+                                  if (v == 'editar') {
                                     _editarAsignatura(asignatura);
-                                  if (v == 'eliminar')
+                                  }
+                                  if (v == 'eliminar') {
                                     _eliminarAsignatura(asignatura);
+                                  }
                                 },
                                 itemBuilder: (context) => const [
                                   PopupMenuItem(

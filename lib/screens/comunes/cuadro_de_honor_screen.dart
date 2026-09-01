@@ -1,36 +1,28 @@
 import 'package:flutter/material.dart';
+import '../../models/asignatura.dart';
 import '../../models/curso.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 
-typedef _FilaHonor = ({String alumnoId, String alumnoNombre, String? instrumento, double horasEfectivasMes});
+typedef _FilaBloque = ({String alumnoId, String alumnoNombre, String asignaturaId, double horasEfectivasMes});
 
-enum _ModoCuadroHonor { global, curso, instrumento }
-
-/// Ranking GLOBAL (no por asignatura) de horas efectivas de estudio de
-/// INSTRUMENTO del mes en curso. A diferencia del ranking por
-/// asignatura (`RankingAsignaturaScreen`, solo profesor/dirección por
-/// privacidad de menores), este es visible para cualquier permiso,
-/// incluidos los propios alumnos — es una excepción deliberada, ver
-/// CLAUDE.md. Se puede agrupar por instrumento (para cualquiera) o por
-/// curso (agrupación reservada a dirección: requiere leer matriculas
-/// de TODOS los alumnos vía `cursosPorAlumno()`, y las reglas de
-/// `matriculas` no dan ese acceso amplio a alumno ni a profesor).
-class CuadroDeHonorScreen extends StatefulWidget {
+/// Cuadro de Honor: horas efectivas de estudio del mes en curso,
+/// agrupadas por curso → asignatura (único criterio, ver CLAUDE.md —
+/// se simplificó desde una versión anterior con varios modos y un
+/// filtro por curso/asignatura, ya retirados). Visible para cualquier
+/// permiso, incluidos los propios alumnos — excepción deliberada del
+/// punto 14 (privacidad de nombres), ver CLAUDE.md. No necesita leer
+/// `matriculas` (dirección-only): `sesionesEstudio.asignaturaId` ya
+/// está denormalizado, así que basta cruzar con `asignaturas`/`cursos`
+/// (ambas de lectura abierta).
+class CuadroDeHonorScreen extends StatelessWidget {
   final Usuario perfil;
 
   const CuadroDeHonorScreen({super.key, required this.perfil});
 
   @override
-  State<CuadroDeHonorScreen> createState() => _CuadroDeHonorScreenState();
-}
-
-class _CuadroDeHonorScreenState extends State<CuadroDeHonorScreen> {
-  final DbService _db = DbService();
-  _ModoCuadroHonor _modo = _ModoCuadroHonor.global;
-
-  @override
   Widget build(BuildContext context) {
+    final db = DbService();
     return Scaffold(
       appBar: AppBar(title: const Text('Cuadro de honor')),
       body: Column(
@@ -39,181 +31,142 @@ class _CuadroDeHonorScreenState extends State<CuadroDeHonorScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Column(
-              children: [
-                const Text('Horas de estudio de instrumento del mes en curso'),
-                const SizedBox(height: 8),
-                SegmentedButton<_ModoCuadroHonor>(
-                  segments: [
-                    const ButtonSegment(value: _ModoCuadroHonor.global, label: Text('Global')),
-                    if (widget.perfil.esDireccion)
-                      const ButtonSegment(value: _ModoCuadroHonor.curso, label: Text('Por curso')),
-                    const ButtonSegment(
-                        value: _ModoCuadroHonor.instrumento, label: Text('Por instrumento')),
-                  ],
-                  selected: {_modo},
-                  onSelectionChanged: (s) => setState(() => _modo = s.first),
-                ),
-              ],
-            ),
+            child: const Text('Horas de estudio del mes en curso'),
           ),
-          Expanded(
-            child: StreamBuilder<List<_FilaHonor>>(
-              stream: _db.cuadroDeHonorMensual(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('No se pudo cargar el cuadro de honor: ${snapshot.error}'));
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final filas = snapshot.data!;
-                if (filas.isEmpty) {
-                  return const Center(child: Text('Todavía no hay horas de estudio este mes.'));
-                }
-                switch (_modo) {
-                  case _ModoCuadroHonor.global:
-                    return _ListaPlana(filas: filas);
-                  case _ModoCuadroHonor.instrumento:
-                    return _ListaAgrupadaPorInstrumento(filas: filas);
-                  case _ModoCuadroHonor.curso:
-                    return _ListaAgrupadaPorCurso(db: _db, filas: filas);
-                }
-              },
-            ),
-          ),
+          Expanded(child: _ListaAgrupadaPorBloques(db: db)),
         ],
       ),
     );
   }
 }
 
-class _ListaPlana extends StatelessWidget {
-  final List<_FilaHonor> filas;
-  const _ListaPlana({required this.filas});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      itemCount: filas.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (context, i) => _filaRanking(context, filas[i], i),
-    );
-  }
-}
-
-Widget _filaRanking(BuildContext context, _FilaHonor fila, int posicion) {
-  return ListTile(
-    leading: CircleAvatar(
-      backgroundColor: posicion < 3 ? Colors.amber.withValues(alpha: 0.3) : null,
-      child: Text('${posicion + 1}'),
-    ),
-    title: Text(fila.alumnoNombre),
-    trailing: Text(
-      '${fila.horasEfectivasMes.toStringAsFixed(1)} h',
-      style: const TextStyle(fontWeight: FontWeight.bold),
-    ),
-  );
-}
-
-class _ListaAgrupadaPorInstrumento extends StatelessWidget {
-  final List<_FilaHonor> filas;
-  const _ListaAgrupadaPorInstrumento({required this.filas});
-
-  @override
-  Widget build(BuildContext context) {
-    final grupos = <String, List<_FilaHonor>>{};
-    for (final fila in filas) {
-      final clave = (fila.instrumento == null || fila.instrumento!.isEmpty)
-          ? 'Sin instrumento'
-          : fila.instrumento!;
-      (grupos[clave] ??= []).add(fila);
-    }
-    final claves = grupos.keys.toList()..sort();
-    return ListView(
-      children: [
-        for (final clave in claves) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(clave,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ),
-          for (var i = 0; i < grupos[clave]!.length; i++)
-            _filaRanking(context, grupos[clave]![i], i),
-          const Divider(height: 1),
-        ],
-      ],
-    );
-  }
-}
-
-class _ListaAgrupadaPorCurso extends StatelessWidget {
+/// Curso → asignatura, cada bloque coloreado contra el objetivo de ESA
+/// asignatura (`Asignatura.horasObjetivoMensual`, ver CLAUDE.md).
+class _ListaAgrupadaPorBloques extends StatelessWidget {
   final DbService db;
-  final List<_FilaHonor> filas;
-  const _ListaAgrupadaPorCurso({required this.db, required this.filas});
+  const _ListaAgrupadaPorBloques({required this.db});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<String>(
-      stream: db.cursoEscolarActivo(),
-      builder: (context, snapActivo) {
-        if (!snapActivo.hasData) {
+    return StreamBuilder<List<_FilaBloque>>(
+      stream: db.horasPorAsignaturaMensual(),
+      builder: (context, snapFilas) {
+        if (snapFilas.hasError) {
+          return Center(child: Text('No se pudo cargar el cuadro de honor: ${snapFilas.error}'));
+        }
+        if (!snapFilas.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        return FutureBuilder<Map<String, List<Curso>>>(
-          future: db.cursosPorAlumno(cursoEscolar: snapActivo.data!),
-          builder: (context, snapCursos) {
-            if (!snapCursos.hasData) {
+        final filas = snapFilas.data!;
+        if (filas.isEmpty) {
+          return const Center(child: Text('Todavía no hay horas de estudio este mes.'));
+        }
+        return FutureBuilder<(List<Asignatura>, List<Curso>)>(
+          future: Future.wait([db.todasLasAsignaturas().first, db.cursos().first]).then(
+              (r) => (r[0] as List<Asignatura>, r[1] as List<Curso>)),
+          builder: (context, snapRef) {
+            if (!snapRef.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final cursosPorAlumno = snapCursos.data!;
-            final grupos = <String, ({Curso? curso, List<_FilaHonor> filas})>{};
+            final (asignaturas, cursos) = snapRef.data!;
+            final asignaturaPorId = {for (final a in asignaturas) a.id!: a};
+            final cursoPorId = {for (final c in cursos) c.id!: c};
+
+            final bloques = <String, Map<String, List<_FilaBloque>>>{};
             for (final fila in filas) {
-              final cursos = cursosPorAlumno[fila.alumnoId] ?? const [];
-              if (cursos.isEmpty) {
-                final actual = grupos['_sin_matricular'];
-                grupos['_sin_matricular'] = (
-                  curso: null,
-                  filas: [...(actual?.filas ?? const []), fila],
-                );
-                continue;
-              }
-              for (final curso in cursos) {
-                final actual = grupos[curso.id];
-                grupos[curso.id!] = (
-                  curso: curso,
-                  filas: [...(actual?.filas ?? const []), fila],
-                );
-              }
+              final asignatura = asignaturaPorId[fila.asignaturaId];
+              if (asignatura == null) continue;
+              final porAsignatura = bloques[asignatura.cursoId] ??= {};
+              (porAsignatura[fila.asignaturaId] ??= []).add(fila);
             }
-            final entradas = grupos.values.toList()
+
+            final cursoIds = bloques.keys.toList()
               ..sort((a, b) {
-                if (a.curso == null) return 1;
-                if (b.curso == null) return -1;
-                return a.curso!.nivel.index != b.curso!.nivel.index
-                    ? a.curso!.nivel.index.compareTo(b.curso!.nivel.index)
-                    : (a.curso!.numeroCurso ?? 0).compareTo(b.curso!.numeroCurso ?? 0);
+                final ca = cursoPorId[a];
+                final cb = cursoPorId[b];
+                if (ca == null) return 1;
+                if (cb == null) return -1;
+                return ca.nivel.index != cb.nivel.index
+                    ? ca.nivel.index.compareTo(cb.nivel.index)
+                    : (ca.numeroCurso ?? 0).compareTo(cb.numeroCurso ?? 0);
               });
+
+            if (cursoIds.isEmpty) {
+              return const Center(child: Text('Todavía no hay horas de estudio este mes.'));
+            }
+
             return ListView(
               children: [
-                for (final entrada in entradas) ...[
+                for (final cursoId in cursoIds) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                    child: Text(entrada.curso?.nombre ?? 'Sin matricular',
+                    child: Text(cursoPorId[cursoId]?.nombre ?? 'Curso desconocido',
                         style: Theme.of(context)
                             .textTheme
-                            .titleMedium
+                            .titleLarge
                             ?.copyWith(fontWeight: FontWeight.bold)),
                   ),
-                  for (var i = 0; i < entrada.filas.length; i++)
-                    _filaRanking(context, entrada.filas[i], i),
-                  const Divider(height: 1),
+                  for (final asignaturaEntry in (bloques[cursoId]!.entries.toList()
+                    ..sort((a, b) => (asignaturaPorId[a.key]?.nombre ?? '')
+                        .compareTo(asignaturaPorId[b.key]?.nombre ?? ''))))
+                    _BloqueAsignatura(
+                      asignatura: asignaturaPorId[asignaturaEntry.key],
+                      filas: asignaturaEntry.value,
+                    ),
                 ],
               ],
             );
           },
         );
       },
+    );
+  }
+}
+
+class _BloqueAsignatura extends StatelessWidget {
+  final Asignatura? asignatura;
+  final List<_FilaBloque> filas;
+  const _BloqueAsignatura({required this.asignatura, required this.filas});
+
+  @override
+  Widget build(BuildContext context) {
+    final ordenadas = [...filas]..sort((a, b) => b.horasEfectivasMes.compareTo(a.horasEfectivasMes));
+    final objetivo = asignatura?.horasObjetivoMensual ?? 0;
+    final tieneObjetivo = objetivo > 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: [
+              Text(asignatura?.nombre ?? 'Asignatura desconocida',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              if (tieneObjetivo) ...[
+                const SizedBox(width: 8),
+                Text('· objetivo ${objetivo.toStringAsFixed(1)} h',
+                    style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+        for (var i = 0; i < ordenadas.length; i++)
+          ListTile(
+            dense: true,
+            leading: CircleAvatar(radius: 14, child: Text('${i + 1}')),
+            title: Text(ordenadas[i].alumnoNombre),
+            trailing: Text(
+              '${ordenadas[i].horasEfectivasMes.toStringAsFixed(1)} h',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: !tieneObjetivo
+                    ? null
+                    : (ordenadas[i].horasEfectivasMes >= objetivo ? Colors.green : Colors.red),
+              ),
+            ),
+          ),
+        const Divider(height: 1),
+      ],
     );
   }
 }

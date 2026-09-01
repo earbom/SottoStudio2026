@@ -10,6 +10,7 @@ import '../models/criterio_evaluacion.dart';
 import '../models/sustitucion.dart';
 import '../models/horario_laboral.dart';
 import '../models/marcaje.dart';
+import '../models/incidencia.dart';
 
 /// Centraliza el acceso a Firestore. Los nombres de colección aquí
 /// deben coincidir EXACTAMENTE con los usados en firestore.rules.
@@ -40,7 +41,10 @@ class DbService {
 
   /// Avanza el curso escolar activo del centro: lo añade al historial
   /// (si no estuviera ya) y lo marca como activo. Los cursos anteriores
-  /// quedan intactos, solo consultables desde cada pantalla.
+  /// quedan intactos, solo consultables desde cada pantalla. También
+  /// sirve para VOLVER a un año anterior (no comprueba que el nuevo
+  /// sea cronológicamente posterior, solo el formato en la UI) — ver
+  /// CLAUDE.md.
   Future<void> avanzarCursoEscolar(String nuevoCursoEscolar) async {
     final ref = _db.collection('configuracion').doc('centro');
     final actual = await ref.get();
@@ -52,6 +56,29 @@ class DbService {
     }, SetOptions(merge: true));
   }
 
+  /// Comprueba si un curso escolar tiene alguna matrícula real (activa
+  /// o no) antes de dejar eliminarlo del historial, para poder avisar
+  /// a dirección de que hay datos detrás. Igualdad simple, sin índice
+  /// compuesto.
+  Future<bool> tieneDatosCursoEscolar(String cursoEscolar) async {
+    final snap = await _db
+        .collection('matriculas')
+        .where('cursoEscolar', isEqualTo: cursoEscolar)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
+  /// Quita un año SOLO del historial (deja de aparecer como opción de
+  /// curso escolar) — nunca borra matrículas/asistencias/notas reales
+  /// de ese año, que siguen existiendo en Firestore (ver CLAUDE.md).
+  /// El llamador debe comprobar antes que no es el curso activo.
+  Future<void> eliminarCursoEscolarDelHistorial(String cursoEscolar) {
+    return _db.collection('configuracion').doc('centro').update({
+      'historialCursosEscolares': FieldValue.arrayRemove([cursoEscolar]),
+    });
+  }
+
   // -------------------------------------------------------------
   // Sesiones de estudio
   // -------------------------------------------------------------
@@ -60,7 +87,7 @@ class DbService {
     // igual que Nota.fechaDia/cursoEscolar): el Cuadro de Honor
     // necesita mostrar el nombre de OTROS alumnos, y las reglas de
     // `usuarios` no permiten a un alumno leer el perfil de otro — con
-    // el nombre ya copiado en la propia sesión, cuadroDeHonorMensual()
+    // el nombre ya copiado en la propia sesión, horasPorAsignaturaMensual()
     // no necesita leer `usuarios` de nadie más (ver CLAUDE.md).
     final alumno = await obtenerUsuario(sesion.alumnoId);
     await _db.collection('sesionesEstudio').add({
@@ -70,6 +97,72 @@ class DbService {
     // La actualización de estadisticasAlumno la hace una Cloud Function
     // (ver /functions) al detectar la creación de este documento.
     // No se escribe estadisticasAlumno desde el cliente (ver rules).
+  }
+
+  /// Registra horas de estudio TEÓRICO reportadas por el propio
+  /// profesor para una semana completa (p. ej. "3 horas" de un
+  /// cuaderno en papel de una asignatura no instrumental — ver
+  /// CLAUDE.md). Sin grabación de audio ni distinción efectivo/total
+  /// real (no aplica la lógica de 3 estados del punto 2):
+  /// duracionTotalMs == duracionEfectivaMs a propósito, es un total
+  /// autoinformado, no una medición. fechaInicio = lunes de esa
+  /// semana, fechaFin = domingo.
+  /// Registra o corrige el total MENSUAL de horas de estudio manual de
+  /// un alumno en una asignatura (sustituye al antiguo registro
+  /// semanal — ver CLAUDE.md, los profesores solo recogen totales
+  /// mensuales, editando directamente una celda de
+  /// `HorasAsignaturaScreen`). Sin distinción efectivo/total real (no
+  /// aplica la lógica de 3 estados del punto 2): duracionTotalMs ==
+  /// duracionEfectivaMs a propósito, es un total autoinformado. Si ya
+  /// existe una entrada manual de ESE alumno+asignatura+mes, la
+  /// actualiza en vez de duplicarla — se localiza con una consulta de
+  /// dos igualdades (alumnoId+asignaturaId, ya "provably compliant")
+  /// filtrando en cliente por mes y `registradoPorProfesorId` no nulo.
+  Future<void> registrarHorasManualesMes({
+    required String alumnoId,
+    required String asignaturaId,
+    required DateTime mes, // cualquier día de ese mes
+    required double horas,
+    required String profesorId,
+  }) async {
+    final inicioMes = DateTime(mes.year, mes.month, 1);
+    final finMes = DateTime(mes.year, mes.month + 1, 0);
+    final ms = (horas * 3600000).round();
+
+    final existentes = await _db
+        .collection('sesionesEstudio')
+        .where('alumnoId', isEqualTo: alumnoId)
+        .where('asignaturaId', isEqualTo: asignaturaId)
+        .get();
+    QueryDocumentSnapshot<Map<String, dynamic>>? existente;
+    for (final d in existentes.docs) {
+      final data = d.data();
+      if (data['registradoPorProfesorId'] == null) continue;
+      final fi = DateTime.tryParse(data['fechaInicio'] ?? '');
+      if (fi != null && fi.year == inicioMes.year && fi.month == inicioMes.month) {
+        existente = d;
+        break;
+      }
+    }
+
+    if (existente != null) {
+      await _db.collection('sesionesEstudio').doc(existente.id).update({
+        'duracionTotalMs': ms,
+        'duracionEfectivaMs': ms,
+        'registradoPorProfesorId': profesorId,
+      });
+    } else {
+      await guardarSesion(SesionEstudio(
+        alumnoId: alumnoId,
+        tipo: TipoSesion.teorico,
+        asignaturaId: asignaturaId,
+        fechaInicio: inicioMes,
+        fechaFin: finMes,
+        duracionTotalMs: ms,
+        duracionEfectivaMs: ms,
+        registradoPorProfesorId: profesorId,
+      ));
+    }
   }
 
   Stream<List<SesionEstudio>> historialAlumno(String alumnoId) {
@@ -216,57 +309,62 @@ class DbService {
     };
   }
 
-  /// Cuadro de honor: ranking GLOBAL (no por asignatura) de horas
-  /// efectivas de estudio de INSTRUMENTO (no teórico) del mes en curso,
-  /// con nombre de alumno — a diferencia del ranking por asignatura,
-  /// visible también para alumnos (ver CLAUDE.md, excepción deliberada
-  /// al punto 14 de privacidad). Mismo patrón de agregación en cliente
-  /// que `informeDireccion()`, temporal hasta desplegar Cloud Functions.
-  ///
-  /// El filtro `tipo == 'instrumento'` va en la propia consulta (no
-  /// solo como `continue` en el bucle): la regla de lectura de
-  /// `sesionesEstudio` para alumno solo permite ver sesiones propias o
-  /// de tipo 'instrumento' — una consulta sin ese `where` no es
-  /// "provably compliant" y Firestore la rechaza entera con
-  /// permission-denied para el rol alumno (mismo patrón que CLAUDE.md
-  /// punto 25). El nombre sale de `alumnoNombre`, denormalizado en la
-  /// propia sesión al grabarla (`guardarSesion`) — un alumno no puede
-  /// leer el documento `usuarios` de otro alumno, así que no se puede
-  /// resolver el nombre con un `obtenerUsuario()` por cada fila aquí.
-  Stream<List<({String alumnoId, String alumnoNombre, String? instrumento, double horasEfectivasMes})>>
-      cuadroDeHonorMensual() {
+  /// Cuadro de Honor: horas efectivas del mes en curso agrupadas por
+  /// curso → asignatura (ver CLAUDE.md), de CUALQUIER tipo de sesión
+  /// (instrumento + teórico). Visible a TODOS los permisos: excepción
+  /// deliberada del punto 14 (privacidad de nombres) — DISTINTA de
+  /// `HorasAsignaturaScreen` (sigue siendo solo profesor/dirección). El
+  /// filtro `tipo in [...]` va en la propia consulta para ser "provably
+  /// compliant" para alumno (ver CLAUDE.md puntos 25/42/53).
+  Stream<
+      List<
+          ({
+            String alumnoId,
+            String alumnoNombre,
+            String asignaturaId,
+            double horasEfectivasMes
+          })>> horasPorAsignaturaMensual() {
     return _db
         .collection('sesionesEstudio')
-        .where('tipo', isEqualTo: 'instrumento')
+        .where('tipo', whereIn: ['instrumento', 'teorico'])
         .snapshots()
         .map((snap) {
       final ahora = DateTime.now();
       final inicioMes = DateTime(ahora.year, ahora.month, 1);
 
-      final msPorAlumno = <String, int>{};
+      final msPorAlumnoYAsignatura = <String, Map<String, int>>{};
       final nombrePorAlumno = <String, String>{};
-      final instrumentoPorAlumno = <String, String?>{};
       for (final doc in snap.docs) {
         final data = doc.data();
         final fechaInicio = DateTime.tryParse(data['fechaInicio'] ?? '');
         if (fechaInicio == null || fechaInicio.isBefore(inicioMes)) continue;
+        final asignaturaId = data['asignaturaId'] as String?;
+        if (asignaturaId == null || asignaturaId.isEmpty) continue;
         final alumnoId = data['alumnoId'] as String? ?? '';
         final efectivoMs = (data['duracionEfectivaMs'] as num?)?.toInt() ?? 0;
-        msPorAlumno[alumnoId] = (msPorAlumno[alumnoId] ?? 0) + efectivoMs;
-        nombrePorAlumno[alumnoId] = data['alumnoNombre'] as String? ?? '';
-        instrumentoPorAlumno[alumnoId] = data['instrumento'] as String?;
+        final porAsignatura = msPorAlumnoYAsignatura[alumnoId] ??= {};
+        porAsignatura[asignaturaId] = (porAsignatura[asignaturaId] ?? 0) + efectivoMs;
+        // Mismo bug ya corregido en cuadroDeHonorMensual (punto 50): no
+        // dejar que un valor ausente sobrescriba un alumnoNombre ya
+        // conocido.
+        final nombreNuevo = data['alumnoNombre'] as String?;
+        if (nombreNuevo != null && nombreNuevo.isNotEmpty) {
+          nombrePorAlumno[alumnoId] = nombreNuevo;
+        } else {
+          nombrePorAlumno.putIfAbsent(alumnoId, () => '');
+        }
       }
 
-      final filas = msPorAlumno.entries
-          .map((entrada) => (
-                alumnoId: entrada.key,
-                alumnoNombre: nombrePorAlumno[entrada.key] ?? '',
-                instrumento: instrumentoPorAlumno[entrada.key],
-                horasEfectivasMes: entrada.value / 3600000,
-              ))
-          .toList()
-        ..sort((a, b) => b.horasEfectivasMes.compareTo(a.horasEfectivasMes));
-      return filas;
+      return [
+        for (final alumnoEntry in msPorAlumnoYAsignatura.entries)
+          for (final asigEntry in alumnoEntry.value.entries)
+            (
+              alumnoId: alumnoEntry.key,
+              alumnoNombre: nombrePorAlumno[alumnoEntry.key] ?? '',
+              asignaturaId: asigEntry.key,
+              horasEfectivasMes: asigEntry.value / 3600000,
+            )
+      ];
     });
   }
 
@@ -282,6 +380,27 @@ class DbService {
         .collection('notas')
         .where('alumnoId', isEqualTo: alumnoId)
         .orderBy('fecha', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Nota.fromMap(d.id, d.data())).toList());
+  }
+
+  /// Todas las notas de una asignatura (de cualquier alumno) — a
+  /// diferencia de `notasDeAlumno`, no filtra por alumno: es la
+  /// fuente de la cuadrícula de notas (filas=alumnos,
+  /// columnas=criterios). Sin `orderBy` (se indexa client-side por
+  /// alumnoId+criterioId en la cuadrícula), así que basta el índice
+  /// automático de un solo campo.
+  ///
+  /// La regla de lectura de `notas` para profesor/dirección
+  /// (`esProfesorODireccion()`) NO depende de `resource.data` —a
+  /// diferencia de `matriculas`/`asistencias`—, así que cualquier
+  /// consulta (con o sin más filtros) es "provably compliant" para
+  /// esos roles; no hace falta acotar más esta consulta (ver CLAUDE.md
+  /// punto 25 para el caso contrario).
+  Stream<List<Nota>> notasDeAsignatura(String asignaturaId) {
+    return _db
+        .collection('notas')
+        .where('asignaturaId', isEqualTo: asignaturaId)
         .snapshots()
         .map((snap) => snap.docs.map((d) => Nota.fromMap(d.id, d.data())).toList());
   }
@@ -370,6 +489,19 @@ class DbService {
     return Usuario.fromMap(doc.id, doc.data()!);
   }
 
+  /// Busca un usuario por email exacto — usado por la importación
+  /// masiva desde Excel para no duplicar un alumno ya existente al
+  /// reimportar el mismo archivo (ver CLAUDE.md). La regla de lectura
+  /// de `usuarios` para profesor/dirección no depende de
+  /// `resource.data`, así que esta consulta es "provably compliant"
+  /// sin más condición (mismo criterio que `notas`, CLAUDE.md punto 25).
+  Future<Usuario?> obtenerUsuarioPorEmail(String email) async {
+    final snap =
+        await _db.collection('usuarios').where('email', isEqualTo: email).limit(1).get();
+    if (snap.docs.isEmpty) return null;
+    return Usuario.fromMap(snap.docs.first.id, snap.docs.first.data());
+  }
+
   /// Registra la visita actual (campo `ultimaVisita`) y devuelve la
   /// anterior (o null si es la primera vez), para poder calcular
   /// avisos in-app tipo "notas nuevas desde tu última visita" sin
@@ -429,13 +561,96 @@ class DbService {
   // -------------------------------------------------------------
   // Asignaturas
   // -------------------------------------------------------------
+
+  /// Recalcula gruposAsignatura/{nombreNormalizado}.profesorIds como la
+  /// UNIÓN de profesorIds de TODAS las asignaturas (de cualquier
+  /// curso) que comparten ese nombre normalizado. Sin Cloud Functions
+  /// desplegadas, esto corre en cliente cada vez que se crea/edita una
+  /// asignatura o se (des)asigna un profesor — ver CLAUDE.md, permiso
+  /// cross-curso por nombre de asignatura.
+  Future<void> _sincronizarGrupoAsignatura(String nombreNormalizado) async {
+    if (nombreNormalizado.isEmpty) return;
+    final snap = await _db
+        .collection('asignaturas')
+        .where('nombreNormalizado', isEqualTo: nombreNormalizado)
+        .get();
+    final union = <String>{
+      for (final d in snap.docs)
+        ...List<String>.from(d.data()['profesorIds'] ?? const [])
+    }.toList();
+    await _db
+        .collection('gruposAsignatura')
+        .doc(nombreNormalizado)
+        .set({'profesorIds': union}, SetOptions(merge: true));
+  }
+
+  /// Migración ÚNICA a ejecutar una sola vez tras desplegar el permiso
+  /// cross-curso (ver CLAUDE.md): rellena `nombreNormalizado` en las
+  /// asignaturas creadas antes de este cambio y reconstruye desde cero
+  /// TODOS los documentos de `gruposAsignatura`. Después de esta
+  /// migración, la sincronización normal ya corre sola en cada
+  /// escritura (crear/editar asignatura, (des)asignar profesor).
+  Future<void> migrarGruposAsignatura() async {
+    final snap = await _db.collection('asignaturas').get();
+    final union = <String, Set<String>>{};
+    final batchDocs = _db.batch();
+    for (final d in snap.docs) {
+      final nombre = d.data()['nombre'] as String? ?? '';
+      final clave = nombre.trim().toLowerCase();
+      if (d.data()['nombreNormalizado'] != clave) {
+        batchDocs.update(d.reference, {'nombreNormalizado': clave});
+      }
+      (union[clave] ??= {}).addAll(List<String>.from(d.data()['profesorIds'] ?? const []));
+    }
+    await batchDocs.commit();
+    final batchGrupos = _db.batch();
+    for (final entry in union.entries) {
+      if (entry.key.isEmpty) continue;
+      batchGrupos.set(
+        _db.collection('gruposAsignatura').doc(entry.key),
+        {'profesorIds': entry.value.toList()},
+        SetOptions(merge: true),
+      );
+    }
+    await batchGrupos.commit();
+  }
+
   Future<String> crearAsignatura(Asignatura asignatura) async {
     final ref = await _db.collection('asignaturas').add(asignatura.toMap());
+    await _sincronizarGrupoAsignatura(asignatura.nombre.trim().toLowerCase());
     return ref.id;
   }
 
-  Future<void> actualizarAsignatura(String asignaturaId, Map<String, dynamic> cambios) {
-    return _db.collection('asignaturas').doc(asignaturaId).update(cambios);
+  /// Si `cambios` incluye 'nombre' o 'profesorIds', resincroniza el/los
+  /// grupo(s) de gruposAsignatura afectados (ver
+  /// `_sincronizarGrupoAsignatura`) — necesario para que el permiso
+  /// cruzado entre cursos siga reflejando quién enseña qué.
+  Future<void> actualizarAsignatura(String asignaturaId, Map<String, dynamic> cambios) async {
+    final tocaNombre = cambios.containsKey('nombre');
+    final tocaProfesores = cambios.containsKey('profesorIds');
+    String? nombreAnterior;
+    if (tocaNombre) {
+      final actual = await _db.collection('asignaturas').doc(asignaturaId).get();
+      nombreAnterior = actual.data()?['nombre'] as String?;
+      cambios = {
+        ...cambios,
+        'nombreNormalizado': (cambios['nombre'] as String).trim().toLowerCase(),
+      };
+    }
+    await _db.collection('asignaturas').doc(asignaturaId).update(cambios);
+
+    if (tocaNombre) {
+      final claveNueva = (cambios['nombre'] as String).trim().toLowerCase();
+      await _sincronizarGrupoAsignatura(claveNueva);
+      final claveVieja = nombreAnterior?.trim().toLowerCase();
+      if (claveVieja != null && claveVieja != claveNueva) {
+        await _sincronizarGrupoAsignatura(claveVieja);
+      }
+    } else if (tocaProfesores) {
+      final doc = await _db.collection('asignaturas').doc(asignaturaId).get();
+      final nombre = doc.data()?['nombre'] as String? ?? '';
+      await _sincronizarGrupoAsignatura(nombre.trim().toLowerCase());
+    }
   }
 
   /// Solo se puede eliminar una asignatura sin alumnos matriculados
@@ -452,7 +667,10 @@ class DbService {
     if (snap.docs.isNotEmpty) {
       throw Exception('No se puede eliminar una asignatura con alumnos matriculados.');
     }
+    final doc = await _db.collection('asignaturas').doc(asignaturaId).get();
+    final nombre = doc.data()?['nombre'] as String? ?? '';
     await _db.collection('asignaturas').doc(asignaturaId).delete();
+    await _sincronizarGrupoAsignatura(nombre.trim().toLowerCase());
   }
 
   Future<Asignatura?> asignatura(String asignaturaId) async {
@@ -481,6 +699,26 @@ class DbService {
         .map((snap) => snap.docs.map((d) => Asignatura.fromMap(d.id, d.data())).toList());
   }
 
+  /// Todas las asignaturas (de CUALQUIER curso) que comparten nombre
+  /// con alguna donde este profesor figura en profesorIds —
+  /// generalización cross-curso de `asignaturasDeProfesor`: ve TODOS
+  /// los cursos que ofrecen p.ej. "Piano", no solo aquel en el que
+  /// dirección lo puso originalmente en profesorIds (ver CLAUDE.md,
+  /// permiso cruzado entre cursos). Agregación en cliente sobre el
+  /// stream ya abierto de `asignaturas` (lectura abierta a cualquier
+  /// autenticado), sin necesitar un índice ni consultar
+  /// gruposAsignatura (que solo hace falta en las reglas).
+  Stream<List<Asignatura>> asignaturasDeProfesorCrossCurso(String profesorUid) {
+    return _db.collection('asignaturas').snapshots().map((snap) {
+      final todas = snap.docs.map((d) => Asignatura.fromMap(d.id, d.data())).toList();
+      final nombresDelProfesor = todas
+          .where((a) => a.profesorIds.contains(profesorUid))
+          .map((a) => a.nombre.trim().toLowerCase())
+          .toSet();
+      return todas.where((a) => nombresDelProfesor.contains(a.nombre.trim().toLowerCase())).toList();
+    });
+  }
+
   Stream<List<Asignatura>> todasLasAsignaturas() {
     return _db
         .collection('asignaturas')
@@ -489,17 +727,23 @@ class DbService {
   }
 
   /// Añade o quita a un profesor de `profesorIds` de una asignatura
-  /// (una asignatura puede tener varios profesores).
+  /// (una asignatura puede tener varios profesores). Resincroniza el
+  /// grupo de gruposAsignatura de esa asignatura después, para que el
+  /// permiso cruzado entre cursos vea el cambio (ver CLAUDE.md).
   Future<void> asignarProfesorAAsignatura({
     required String asignaturaId,
     required String profesorId,
     required bool asignar,
-  }) {
-    return _db.collection('asignaturas').doc(asignaturaId).update({
+  }) async {
+    final ref = _db.collection('asignaturas').doc(asignaturaId);
+    await ref.update({
       'profesorIds': asignar
           ? FieldValue.arrayUnion([profesorId])
           : FieldValue.arrayRemove([profesorId]),
     });
+    final doc = await ref.get();
+    final nombre = doc.data()?['nombre'] as String? ?? '';
+    await _sincronizarGrupoAsignatura(nombre.trim().toLowerCase());
   }
 
   // -------------------------------------------------------------
@@ -598,6 +842,93 @@ class DbService {
         .where('activa', isEqualTo: true)
         .snapshots()
         .map((snap) => snap.docs.map((d) => Matricula.fromMap(d.id, d.data())).toList());
+  }
+
+  /// Alumnos de un profesor en un curso escolar dado, agrupados por
+  /// curso — construye tanto el listado "Alumnos" del profesor como
+  /// sus cabeceras de agrupación en una sola pasada.
+  ///
+  /// NO se puede montar reutilizando `cursosPorAlumno()`: esa función
+  /// consulta `matriculas` filtrando solo por `cursoEscolar`+`activa`
+  /// (sin `asignaturaId`), lo que no es "provably compliant" para el
+  /// rol profesor — su regla de lectura de `matriculas` depende de
+  /// `resource.data.asignaturaId` (ver CLAUDE.md punto 25), así que
+  /// Firestore rechazaría la consulta entera. En su lugar se itera
+  /// por las asignaturas DEL PROFESOR, cross-curso incluido
+  /// (`asignaturasDeProfesorCrossCurso`, lectura abierta) y se
+  /// consulta `matriculasDeAsignatura` por cada una, que ya fija
+  /// `asignaturaId` como igualdad y ya se usa así en
+  /// `AsignaturaDetalleScreen`.
+  ///
+  /// Ya NO filtra por `m.profesorId == profesorId`: con el permiso
+  /// cruzado entre cursos (ver CLAUDE.md), el pin por-alumno de la
+  /// matrícula pasó a ser informativo, no un permiso — cualquier
+  /// profesor de la asignatura (de cualquier curso con ese nombre) ve
+  /// a TODOS sus matriculados, igual que ya ocurre en
+  /// `AsignaturaDetalleScreen`/`NotasAsignaturaGridScreen`.
+  Future<({List<Usuario> alumnos, Map<String, List<Curso>> cursosPorAlumno})>
+      alumnosDeProfesorAgrupados({
+    required String profesorId,
+    required String cursoEscolar,
+  }) async {
+    final asignaturas = await asignaturasDeProfesorCrossCurso(profesorId).first;
+    final cursoIdsPorAlumno = <String, Set<String>>{};
+    for (final asignatura in asignaturas) {
+      final matriculas =
+          await matriculasDeAsignatura(asignatura.id!, cursoEscolar: cursoEscolar).first;
+      for (final m in matriculas) {
+        if (m.cursoId.isEmpty) continue;
+        (cursoIdsPorAlumno[m.alumnoId] ??= {}).add(m.cursoId);
+      }
+    }
+
+    final alumnos = (await Future.wait(cursoIdsPorAlumno.keys.map(obtenerUsuario)))
+        .whereType<Usuario>()
+        .toList()
+      ..sort((a, b) => a.nombre.compareTo(b.nombre));
+
+    final cursoPorId = <String, Curso>{};
+    for (final ids in cursoIdsPorAlumno.values) {
+      for (final id in ids) {
+        if (cursoPorId.containsKey(id)) continue;
+        final c = await curso(id);
+        if (c != null) cursoPorId[id] = c;
+      }
+    }
+
+    final cursosPorAlumno = {
+      for (final entry in cursoIdsPorAlumno.entries)
+        entry.key: entry.value.map((id) => cursoPorId[id]).whereType<Curso>().toList()
+          ..sort((a, b) => a.nivel.index != b.nivel.index
+              ? a.nivel.index.compareTo(b.nivel.index)
+              : (a.numeroCurso ?? 0).compareTo(b.numeroCurso ?? 0))
+    };
+
+    return (alumnos: alumnos, cursosPorAlumno: cursosPorAlumno);
+  }
+
+  /// Matrículas activas de UN alumno impartidas por UN profesor
+  /// concreto (cross-curso incluido, ver CLAUDE.md), en un curso
+  /// escolar dado — usado para saber qué asignaturas de ese alumno
+  /// puede gestionar el profesor hoy. Mismo motivo que
+  /// `alumnosDeProfesorAgrupados`: se itera por las asignaturas del
+  /// profesor en vez de consultar `matriculas` por `alumnoId`
+  /// directamente (no sería provably compliant para profesor). Ya NO
+  /// filtra por `m.profesorId == profesorId` — ver comentario de
+  /// `alumnosDeProfesorAgrupados`.
+  Future<List<Matricula>> matriculasDeAlumnoImpartidasPorProfesor({
+    required String alumnoId,
+    required String profesorId,
+    required String cursoEscolar,
+  }) async {
+    final asignaturas = await asignaturasDeProfesorCrossCurso(profesorId).first;
+    final resultado = <Matricula>[];
+    for (final asignatura in asignaturas) {
+      final matriculas =
+          await matriculasDeAsignatura(asignatura.id!, cursoEscolar: cursoEscolar).first;
+      resultado.addAll(matriculas.where((m) => m.alumnoId == alumnoId));
+    }
+    return resultado;
   }
 
   // -------------------------------------------------------------
@@ -899,5 +1230,54 @@ class DbService {
         .orderBy('fecha')
         .snapshots()
         .map((snap) => snap.docs.map((d) => Marcaje.fromMap(d.id, d.data())).toList());
+  }
+
+  // -------------------------------------------------------------
+  // Incidencias (feedback/bugs) — ver CLAUDE.md, modo desarrollador
+  // -------------------------------------------------------------
+
+  /// Denormaliza `autorNombre` al crear (mismo patrón que
+  /// `guardarSesion`/`sesionesEstudio.alumnoNombre`): un autor normal
+  /// no puede leer el perfil `usuarios` de otro, así que el
+  /// desarrollador necesita el nombre ya guardado en la propia
+  /// incidencia para poder listarlas sin una lectura extra por fila.
+  Future<void> crearIncidencia(Incidencia incidencia) async {
+    final autor = await obtenerUsuario(incidencia.autorId);
+    await _db.collection('incidencias').add({
+      ...incidencia.toMap(),
+      'autorNombre': autor?.nombre ?? '',
+    });
+  }
+
+  Stream<List<Incidencia>> misIncidencias(String uid) {
+    return _db
+        .collection('incidencias')
+        .where('autorId', isEqualTo: uid)
+        .orderBy('fecha', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Incidencia.fromMap(d.id, d.data())).toList());
+  }
+
+  /// Solo alcanzable en la práctica por una cuenta con permiso
+  /// `desarrollador` — la regla de `incidencias` concede lectura sin
+  /// condición sobre `resource.data` para ese permiso (mismo patrón
+  /// que `esProfesorODireccion()` en `notas`), así que esta consulta
+  /// sin `where` es "provably compliant" sin filtrar nada más aquí.
+  Stream<List<Incidencia>> todasLasIncidencias() {
+    return _db
+        .collection('incidencias')
+        .orderBy('fecha', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Incidencia.fromMap(d.id, d.data())).toList());
+  }
+
+  Future<void> actualizarEstadoIncidencia(String id, EstadoIncidencia estado) {
+    return _db.collection('incidencias').doc(id).update({'estado': estado.name});
+  }
+
+  Future<void> agregarComentarioIncidencia(String id, ComentarioIncidencia comentario) {
+    return _db.collection('incidencias').doc(id).update({
+      'comentarios': FieldValue.arrayUnion([comentario.toMap()]),
+    });
   }
 }

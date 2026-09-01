@@ -95,7 +95,17 @@ class _AlumnoPerfilScreenState extends State<AlumnoPerfilScreen> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Text('Curso escolar: $cursoEscolar', style: const TextStyle(color: Colors.grey)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Curso escolar: $cursoEscolar', style: const TextStyle(color: Colors.grey)),
+                            if (!widget.alumno.tieneCuenta) ...[
+                              const SizedBox(height: 4),
+                              const Text('Sin acceso a la app',
+                                  style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                            ],
+                          ],
+                        ),
                       ),
                       Expanded(
                         child: ListView.separated(

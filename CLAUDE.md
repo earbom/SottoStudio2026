@@ -872,27 +872,664 @@ dirección — un almacén local en el centro no sirve.
     `ios/Runner/Assets.xcassets/AppIcon.appiconset`,
     `macos/Runner/Assets.xcassets/AppIcon.appiconset`, ni `web/icons`.
 
-45. **`DashboardProfesorScreen` agrupada por curso.** Un profesor puede
-    dar la "misma" asignatura (mismo nombre, p. ej. "Armonía") en
-    varios cursos distintos — son documentos `Asignatura` independientes
-    con el mismo `nombre` pero distinto `cursoId`, así que sin agrupar
-    aparecían varias tarjetas idénticas sin forma de distinguir a qué
-    curso pertenecía cada una (reportado durante el piloto). Resuelve
-    `cursoId → Curso` con `db.cursos().first` (un solo fetch, no un
-    stream — la lista de cursos no cambia mientras se ve esta pantalla)
-    y agrupa igual que el resto de vistas agrupadas por curso (puntos
-    31 y 36): secciones ordenadas por `nivel.index`/`numeroCurso`, cada
-    una con su propio `GridView` (`shrinkWrap: true` +
-    `NeverScrollableScrollPhysics`, anidado dentro del `ListView`
-    exterior de secciones).
+45. **`DashboardProfesorScreen` (agrupada por curso) — RETIRADA, ver
+    punto 46.** Existió brevemente agrupando las asignaturas del
+    profesor por curso (mismo problema de origen que el punto 46:
+    `Asignatura.nombre` repetido en varios cursos como documentos
+    independientes). El piloto pidió invertir el orden de navegación
+    —asignatura primero, curso dentro— para ambos roles, así que esta
+    pantalla y su agrupación por curso quedaron obsoletas y se
+    eliminaron por completo en el mismo cambio; no reintroducir un
+    `DashboardProfesorScreen` aparte.
+
+46. **Navegación principal invertida: asignatura primero, curso
+    dentro** (reportado durante el piloto: "en la práctica hay clases
+    de instrumento con alumnos de diferentes cursos", así que entrar
+    primero por curso obligaba a recordar en cuál estaba cada alumno).
+    `AsignaturasPorNombreScreen` (`lib/screens/comunes/`) es ahora el
+    punto de entrada principal para dirección ("Cursos y asignaturas")
+    y profesor ("Mis asignaturas"): agrupa las `Asignatura` por
+    `nombre.trim().toLowerCase()` (coincidencia EXACTA, sin fuzzy
+    matching — decisión deliberada, ver comentario en el propio
+    archivo) y al tocar un grupo abre `AsignaturaNombreCursosScreen`,
+    una lista de los cursos que ofrecen esa asignatura concreta. Viable
+    sin tocar el modelo de datos porque `AsignaturaDetalleScreen` nunca
+    dependió de cómo se llega a ella (solo recibe `{asignatura,
+    perfil}`, nunca `curso`; resuelve el curso de forma perezosa vía
+    `asignatura.cursoId` cuando lo necesita, igual que
+    `RankingAsignaturaScreen`/`AlumnoEnAsignaturaScreen`). El nombre e
+    icono mostrados de cada grupo salen de la asignatura con
+    `createdAt` más antiguo de ese grupo (estable entre reconstrucciones
+    aunque dos documentos tengan mayúsculas/espacios ligeramente
+    distintos). **La gestión de cursos en sí (crear/editar/eliminar,
+    nivel, número, objetivo de horas) NO se tocó** — sigue en
+    `CursosScreen`, ahora accesible como entrada secundaria "Gestionar
+    cursos" (solo dirección) en vez de punto de entrada principal.
+
+47. **Marcar asistencia desde "Alumnos"**, para profesor (reportado
+    durante el piloto: "sería mucho más ágil" que entrar en cada
+    asignatura). `AlumnosScreen` (movida de `direccion/` a `comunes/`,
+    ya no es exclusiva de dirección) es ahora permission-aware: para
+    dirección se comporta igual que antes (listado completo, ficha con
+    boletín PDF); para profesor, la fuente es
+    `DbService.alumnosDeProfesorAgrupados()` y tocar un alumno abre la
+    nueva `AlumnoAsistenciaHoyScreen`, que solo muestra las asignaturas
+    de ESE alumno que ESE profesor imparte (o donde tiene sustitución
+    activa hoy, ver punto 10) y que tienen clase programada hoy según
+    `Matricula.diasSemana` — con los mismos botones rápidos de
+    asistencia (verde/naranja/rojo) que `_FilaMatricula` en
+    `asignatura_detalle_screen.dart`, incluida la suscripción en vivo a
+    `asistenciaDelDiaStream` (nunca un `Future` puntual, ver punto 24).
+    - **Trampa de reglas evitada**: la regla de lectura de `matriculas`
+      para profesor depende de `resource.data.asignaturaId`
+      (`esProfesorDeAsignatura`) — una consulta filtrada solo por
+      `alumnoId` (como habría sido lo natural para "mis alumnos") NO
+      es "provably compliant" y Firestore la rechaza ENTERA para
+      profesor (mismo patrón que el punto 25). Por eso
+      `alumnosDeProfesorAgrupados()` y la nueva
+      `matriculasDeAlumnoImpartidasPorProfesor()` iteran por las
+      asignaturas DEL PROFESOR (`asignaturasDeProfesor`, lectura
+      abierta) y consultan `matriculasDeAsignatura` por cada una —
+      **no** reutilizar `matriculasDeAlumno()` ni `cursosPorAlumno()`
+      (esta última tiene el mismo problema: filtra `matriculas` solo
+      por `cursoEscolar`+`activa`, ya documentado como dirección-only
+      en el punto 42) para construir nada de cara a un profesor. Test
+      de regresión en `firestore-tests/rules.test.js`
+      ("matriculas: consulta por asignaturaId es la única forma
+      segura para profesor") que falla a propósito con el patrón
+      incorrecto, para que nadie lo reintroduzca "simplificando".
+
+48. **Cuadrícula de notas por asignatura** (reportado durante el
+    piloto: comparar alumnos de un vistazo, "como si fuera un excel").
+    `NotasAsignaturaGridScreen`, nuevo icono en el `AppBar` de
+    `AsignaturaDetalleScreen` (visible para profesor/dirección).
+    Filas = alumnos matriculados (mismo criterio `esMio`/`profesorId`
+    que `_FilaMatricula`); columnas = `criteriosDeAsignatura`; celdas =
+    nueva `DbService.notasDeAsignatura(asignaturaId)`. Como el modelo
+    permite varias notas por alumno+criterio a lo largo del tiempo (no
+    hay un valor único garantizado), cada celda muestra la MÁS
+    RECIENTE; si ya hay más de una, tocarla ofrece añadir otra o ver
+    el histórico completo — para eso `AlumnoEnAsignaturaScreen` ganó
+    un parámetro opcional `pestanaInicial` (0=Calendario, 1=Estadísticas,
+    2=Notas, antes siempre arrancaba en Calendario) para poder abrir
+    directamente en la pestaña de Notas. La validación 0-10 de
+    `Nota.valor` (cliente y `firestore.rules`) no se ha tocado.
+    **Verificado, no asumido**: la regla de lectura de `notas` para
+    profesor/dirección (`esProfesorODireccion()`) NO depende de
+    `resource.data` —a diferencia de `matriculas`/`asistencias`—, así
+    que `notasDeAsignatura()` es "provably compliant" sin más
+    condición aunque el profesor no tenga asignado a ese alumno
+    (comportamiento de negocio ya existente, ver punto 25 para el caso
+    contrario); test de regresión que confirma explícitamente esta
+    lectura amplia en `firestore-tests/rules.test.js`.
+
+49. **Colores de asistencia en el calendario del alumno** (verde =
+    asistió, naranja = retraso, rojo = faltó, mismos colores que
+    `_botonEstadoAsistencia`/`_botonAsistencia` ya existentes) — para
+    ver de un vistazo el mes entero, no solo el día seleccionado.
+    `_TabCalendarioState` (`alumno_en_asignatura_screen.dart`) carga
+    ahora TODAS las asistencias del alumno en la asignatura de una vez
+    (`asistenciasDeAlumnoEnAsignatura`, ya existía, ya "provably
+    compliant") en `Map<String, Asistencia> _asistenciasPorFecha`
+    indexado por `Asistencia.fecha` (ya viene en formato `'yyyy-MM-dd'`,
+    no hace falta reformatear), y se recarga también al final de
+    `_marcar()` — si no, el color del día recién marcado no se veía
+    hasta salir y volver a entrar. El círculo "es día de clase
+    programado" (`primaryContainer`) se mantiene como aspecto por
+    defecto cuando no hay asistencia registrada ese día.
+
+50. **Cuadro de honor: nombres en blanco de forma intermitente**
+    (bug real, esta vez de agregación en cliente, no de reglas —
+    aparecía ya con las reglas del punto 42 arregladas).
+    `DbService.cuadroDeHonorMensual()` sobrescribía
+    `nombrePorAlumno[alumnoId]` en CADA sesión del mes sin condición;
+    si un alumno tenía varias sesiones y la última recorrida era
+    anterior a que existiera la denormalización de `alumnoNombre`
+    (sin ese campo), el nombre bueno de una sesión más reciente se
+    borraba con `''` — mismo bug en `instrumentoPorAlumno`. Arreglado
+    sin dejar que un valor vacío/ausente sobrescriba uno ya conocido
+    (`putIfAbsent` solo para el caso "todavía no hay ninguno"). Puro
+    bug de agregación en Dart, sin cambios de reglas ni de modelo.
+
+51. **Permiso cruzado entre cursos por nombre de asignatura** (pedido
+    en el piloto: "si hay varios profesores que dan piano a alumnos de
+    cursos distintos, cualquiera de ellos debe poder puntuar/marcar
+    asistencia de cualquier alumno de esa asignatura, sea cual sea el
+    curso"). Antes el permiso de un profesor estaba atado a UN
+    documento `Asignatura` concreto (`profesorIds`) y, dentro de ese
+    documento, a un pin por alumno (`matriculas.profesorId`, ver punto
+    10). Como las clases de instrumento con el mismo nombre ("Piano")
+    suelen repartirse en documentos `Asignatura` distintos —uno por
+    curso—, ese modelo no permitía a un profesor gestionar alumnos de
+    OTRO documento aunque diera la misma materia.
+    - **`Asignatura.nombreNormalizado`** (`nombre.trim().toLowerCase()`,
+      denormalizado en `toMap()`, NO es un campo del modelo Dart —
+      mismo patrón que `Nota.fechaDia`/`cursoEscolar`) agrupa todos
+      los documentos `Asignatura` que comparten nombre, sin importar
+      el curso.
+    - **`gruposAsignatura/{nombreNormalizado}`**: `{ profesorIds: [...] }`,
+      la UNIÓN de `profesorIds` de TODAS las asignaturas de ese
+      nombre. Sin Cloud Functions desplegadas (ver punto 5), se
+      mantiene en CLIENTE: `DbService._sincronizarGrupoAsignatura()`
+      recalcula el grupo afectado tras `crearAsignatura`,
+      `actualizarAsignatura` (si cambia `nombre` o `profesorIds`),
+      `asignarProfesorAAsignatura` y `eliminarAsignatura`. Las
+      asignaturas creadas antes de este cambio no tenían
+      `nombreNormalizado` ni grupo — `DbService.migrarGruposAsignatura()`
+      es una migración de un solo uso (botón "Recalcular grupos de
+      asignatura", FAB pequeño solo-dirección en
+      `AsignaturasPorNombreScreen`) que se ejecutó una vez tras
+      desplegar este cambio; la sincronización normal ya corre sola
+      desde entonces.
+    - `firestore.rules`: `esProfesorDeAsignaturaPorNombre(asignaturaId)`
+      sustituye a las antiguas `esProfesorDeAsignatura` y
+      `esProfesorAsignadoAlAlumno` (ambas eliminadas) en las reglas de
+      `notas` (create), `asistencias` (create/update) y `matriculas`
+      (read): resuelve `asignaturaId → nombreNormalizado →
+      gruposAsignatura/{clave}.profesorIds` con `.get(clave, default)`
+      en cada paso, para fallar en `false` (nunca lanzar un error de
+      evaluación, mismo criterio que el punto 16) si una asignatura
+      todavía no está migrada o el grupo no existe.
+    - **`matriculas.profesorId` pasa a ser puramente informativo** —
+      ya NO es un permiso, solo indica a quién dirección considera "el
+      profesor de referencia" de ese alumno (el desplegable de
+      `_configurarMatricula` en `asignatura_detalle_screen.dart` deja
+      esto explícito en su etiqueta). El roster de `_FilaMatricula` y
+      de `NotasAsignaturaGridScreen` ya no se filtra por
+      `profesorId == uid`: cualquier profesor con permiso ve a TODOS
+      los matriculados de esa asignatura.
+    - `DbService.asignaturasDeProfesorCrossCurso(profesorUid)` (usada
+      por `AsignaturasPorNombreScreen` para que un profesor descubra
+      TAMBIÉN los cursos de otros documentos con el mismo nombre, no
+      solo aquel en el que dirección lo puso originalmente en
+      `profesorIds`) sustituye a `asignaturasDeProfesor` como fuente
+      para `alumnosDeProfesorAgrupados` y
+      `matriculasDeAlumnoImpartidasPorProfesor` — ambas dejaron
+      también de filtrar por `m.profesorId == profesorId`, por el
+      mismo motivo. `asignaturasDeProfesor` (single-doc) se conserva
+      tal cual para otros usos que sí son de un documento concreto.
+    - Tests de regresión (incluida una consulta con datos "no
+      migrados" que debe denegar sin lanzar error) en
+      `firestore-tests/rules.test.js`, describe
+      `'permiso cruzado entre cursos por nombre de asignatura (gruposAsignatura)'`.
+
+52. **Objetivo de horas de estudio configurable POR ASIGNATURA**
+    (pedido en el piloto: el objetivo de horas vivía solo en `Curso`
+    —punto 17—, un nivel demasiado grueso para asignaturas concretas).
+    `Asignatura.horasObjetivoSemanal`/`horasObjetivoMensual` (double, 0
+    = sin objetivo, mismo criterio que `Curso.horasObjetivoMensual`,
+    validado en `firestore.rules` con el mismo patrón `get(...,0) >= 0`
+    que `cursos`). **`Curso.horasObjetivoMensual` NO desaparece** —
+    sigue siendo la fuente de `informeDireccion()` y del ranking
+    global por curso; el campo nuevo es un nivel más fino, aditivo.
+    - Se edita desde una sección nueva y fija (no un
+      `CriterioEvaluacion` más) en `CriteriosEvaluacionScreen`,
+      justo encima de la lista de criterios: explícitamente NO cuenta
+      para la nota ponderada.
+    - Repuntadas a este campo las 3 vistas que antes usaban
+      `Curso.horasObjetivoMensual` como aproximación provisional (ver
+      punto 17 y la implementación del calendario de estudio del
+      alumno de esta misma tanda de cambios):
+      `AlumnoEnAsignaturaScreen._cargarHorasEstudio()` (semanal/diario),
+      `_TabEstadisticas` (objetivo anual = mensual × 12) y
+      `RankingAsignaturaScreen` (objetivo mensual de la fila).
+    - `RankingAsignaturaScreen` de paso dejó de filtrar matriculados
+      por `m.profesorId == perfil.uid` para un profesor — mismo motivo
+      que el punto 51 (permiso cruzado entre cursos): un profesor de
+      la asignatura ve a TODOS sus matriculados en el ranking, no solo
+      a los que tenía pineados.
+
+53. **Horas de estudio de TEORÍA registradas a mano por el profesor**
+    (pedido en el piloto: en asignaturas no instrumentales —armonía,
+    lenguaje musical...— el profesor recoge los cuadernos de los
+    alumnos una vez a la semana y anota un total, no hay micrófono que
+    grabar). `SesionEstudio.registradoPorProfesorId` (nullable, no
+    forma parte de las sesiones grabadas por el propio alumno) marca
+    estas sesiones como autoinformadas por un profesor concreto.
+    - `DbService.registrarHorasManualesSemana()` crea una
+      `SesionEstudio` con `tipo: TipoSesion.teorico`,
+      `duracionTotalMs == duracionEfectivaMs` (es un total
+      autoinformado, no una medición — no aplica la lógica de 3
+      estados del punto 2) y `fechaInicio`/`fechaFin` fijados al
+      lunes/domingo de la semana elegida. Reutiliza
+      `DbService.guardarSesion()` (misma denormalización de
+      `alumnoNombre` que las sesiones de instrumento).
+    - UI: icono "Registrar horas de esta semana" en `_FilaMatricula`
+      (`asignatura_detalle_screen.dart`), visible solo cuando
+      `!asignatura.permiteGrabarEstudio` (asignaturas NO
+      instrumentales — las de instrumento ya graban de verdad con
+      micrófono) y el profesor puede gestionar esa fila (con el
+      permiso cruzado entre cursos del punto 51, no depende de
+      `matriculas.profesorId`).
+    - `firestore.rules` (`sesionesEstudio`): nueva rama `create`/
+      `update` para `esProfesor()` — exige `tipo == 'teorico'`,
+      `registradoPorProfesorId == request.auth.uid` y
+      `esProfesorDeAsignaturaPorNombre(asignaturaId)` (sin exigir
+      `permiteGrabarEstudio`, que es justo la asignatura contraria a
+      este caso de uso). La rama `update` fija alumno/asignatura/tipo/
+      autor (mismo patrón de "no se puede reetiquetar" que
+      `asistencias`).
+    - **Lectura ampliada** (ver también punto 27): la excepción de
+      lectura para alumno (visibilidad de sesiones de OTROS alumnos)
+      pasó de `tipo == 'instrumento'` a `tipo in ['instrumento',
+      'teorico']` — necesario para que el ranking por bloques del
+      punto 54 sea visible también para alumnos en asignaturas no
+      instrumentales. Sin condicionarlo a si la asignatura tiene
+      objetivo configurado (eso es presentación, no seguridad, ver el
+      propio comentario en `firestore.rules`).
+    - Tests de regresión (incluidos los que antes afirmaban lo
+      contrario, ahora volteados con comentario) en
+      `firestore-tests/rules.test.js`, describe
+      `'sesionesEstudio: registro manual de horas de teoría por el profesor'`.
+
+54. **Cuadro de honor por bloques (curso → asignatura)**, cuarto modo
+    del `SegmentedButton` de `CuadroDeHonorScreen` (junto a
+    Global/Por curso/Por instrumento), visible para TODOS los
+    permisos —incluidos alumnos— a diferencia del modo "Por curso"
+    (dirección-only, porque necesita `cursosPorAlumno()`, que lee
+    `matriculas` de todo el mundo). Es un SEGUNDO carve-out del punto
+    14 (privacidad de nombres), distinto y más amplio que el del
+    punto 27 (que solo cubría instrumento) — `HorasAsignaturaScreen`
+    (antes `RankingAsignaturaScreen`, ver punto 55) NO se toca, sigue
+    siendo solo profesor/dirección.
+    - `DbService.horasPorAsignaturaMensual()`: agregación en cliente
+      sobre `sesionesEstudio` (`tipo in ['instrumento', 'teorico']`,
+      mismo criterio "provably compliant" que `cuadroDeHonorMensual()`
+      — ver CLAUDE.md puntos 25/42), agrupando por
+      `alumnoId`+`asignaturaId` en vez de solo por `alumnoId`. Reusa el
+      mismo `alumnoNombre` denormalizado y el mismo patrón defensivo
+      del punto 50 (un valor ausente nunca sobrescribe un nombre ya
+      conocido).
+    - `_ListaAgrupadaPorBloques`/`_BloqueAsignatura`
+      (`cuadro_de_honor_screen.dart`) cruzan esas filas con
+      `todasLasAsignaturas()`/`cursos()` (ambas de lectura abierta) para
+      resolver nombre/curso/objetivo de cada bloque — **sin leer
+      `matriculas`**, precisamente lo que permite que este modo sea
+      visible para cualquier permiso. Cada bloque de asignatura se
+      colorea verde/rojo contra su propio
+      `Asignatura.horasObjetivoMensual` (punto 52; 0 = sin colorear).
+    - Sin tests de reglas nuevos más allá de los del punto 53 (lectura
+      `tipo in [...]`) — esta pantalla es agregación pura sobre un
+      camino de lectura ya abierto, sin rama de seguridad propia.
+
+55. **Perfil de profesor: notas pendientes, excepción de grabación por
+    alumno, navegación por secciones y fusión Horas/Ranking** (pedido
+    tras usar la app como profesor en el piloto).
+    - **Notas pendientes visibles**: `_TabNotas`
+      (`alumno_en_asignatura_screen.dart`) ya no lista solo las notas
+      puestas — itera sobre TODOS los `criteriosEvaluacion` de la
+      asignatura y agrupa las notas bajo su criterio; un criterio sin
+      ninguna nota aparece como "Pendiente" con un botón de añadir
+      rápido que preselecciona ese criterio en el diálogo de siempre
+      (`_crearNota` ganó un parámetro opcional `preseleccionado`).
+      Antes solo se veía como opción de un desplegable al pulsar "+",
+      sin ninguna vista de qué pruebas existen en total.
+    - **`Usuario.puedeGrabarEstudio` — REVERTIDO por completo, ver
+      punto 59.** Dirección decidió que TODOS los alumnos con cuenta
+      tengan acceso a grabar por defecto; la única discriminación
+      sigue siendo por asignatura (`Asignatura.permiteGrabarEstudio`,
+      punto 41), como antes de este sub-punto. No queda ni el campo en
+      `Usuario`, ni el `SwitchListTile`, ni el pin en
+      `firestore.rules` — el resto de esta entrada (notas pendientes
+      visibles, navegación por secciones, fusión con el ranking) sigue
+      vigente tal cual.
+    - **Navegación por secciones para profesor puro** (no dirección):
+      `AsignaturasPorNombreScreen` enruta a la nueva
+      `SeccionesAsignaturaScreen` (Asistencias/Notas/Horas de estudio)
+      ANTES de elegir curso, para CUALQUIER asignatura — no solo
+      instrumento. `AsignaturaNombreCursosScreen` ganó un parámetro
+      opcional `seccion`: con él fijado, elegir un curso lleva directo
+      a la pantalla de esa sección (`AsistenciasAsignaturaScreen`
+      nueva — solo asistencia de HOY, mismo patrón de 3 botones que
+      `_FilaMatricula` pero sin edición de matrícula ni horas
+      manuales—, `NotasAsignaturaGridScreen` sin cambios, o
+      `HorasAsignaturaScreen`); con `seccion == null` (dirección, sin
+      cambios) sigue yendo a `AsignaturaDetalleScreen` como siempre.
+      Dirección (incluida dirección+profesor combinado) NO usa este
+      menú nuevo — sigue necesitando matricular/editar matrícula/
+      Criterios/Sustituciones, que no encajan en 3 secciones.
+    - **`RankingAsignaturaScreen` eliminada, fusionada en
+      `HorasAsignaturaScreen`**: mostraban esencialmente lo mismo
+      (horas del mes por alumno, coloreadas contra
+      `Asignatura.horasObjetivoMensual`) — un único sitio ahora. El
+      icono de `AsignaturaDetalleScreen` que abría "Ranking" ahora abre
+      esta pantalla. **`HorasAsignaturaScreen` se rediseñó de nuevo
+      poco después como cuadrícula mensual editable — ver punto 59,
+      ya no hay lista-ranking ni `mostrarDialogoRegistrarHorasManuales`.**
+    - **Cuadro de Honor "Por bloques" personalizable — RETIRADO por
+      completo, ver punto 59.** El icono de filtro por curso/asignatura
+      de este sub-punto y los otros 3 modos (Global/Por curso/Por
+      instrumento) del `SegmentedButton` ya no existen: "Por bloques"
+      (curso → asignatura) pasó a ser el ÚNICO modo de
+      `CuadroDeHonorScreen`, sin filtro, siempre visible.
+
+56. **Curso escolar: volver a un año anterior y eliminarlo del
+    historial** (dirección temía pulsar "avanzar" por error).
+    `DbService.avanzarCursoEscolar` ya servía para volver atrás (no
+    comprobaba que el nuevo año fuera cronológicamente posterior, solo
+    el formato) pero no era un flujo explícito — ahora cada fila del
+    historial que no es la activa tiene un botón "Marcar como activo"
+    que llama al mismo método, sin tocar ningún dato (matrículas/
+    notas/asistencias de ese año siguen intactas y vuelven a ser
+    utilizables). Nuevo botón "Eliminar del historial"
+    (`DbService.eliminarCursoEscolarDelHistorial`, `arrayRemove` sobre
+    `historialCursosEscolares`) — **solo quita el año de la lista,
+    nunca borra matrículas/notas/asistencias reales** (decisión
+    deliberada: coherente con que en esta app nunca se borran
+    registros académicos, ver `marcajes`). Antes de dejar borrar,
+    `DbService.tieneDatosCursoEscolar` comprueba si el año tiene alguna
+    matrícula y muestra un aviso si es así; en cualquier caso, una
+    segunda confirmación con cuenta atrás de 5 segundos
+    (`_DialogoConfirmarConCuentaAtras` en `curso_escolar_screen.dart`)
+    antes de poder pulsar "Eliminar". Sin cambios de `firestore.rules`
+    (`configuracion` ya permitía `update` a dirección sin más
+    condición) ni de `firestore-tests`.
+
+57. **Alumnos sin cuenta de acceso + importación masiva desde
+    plantilla Excel** (para volcar de golpe los datos que el centro
+    lleva hoy en hojas de Google Drive no homogéneas).
+    - `Usuario.email` pasa a **nullable** y gana
+      `Usuario.tieneCuenta` (bool, default `true`, marca explícita no
+      inferida): un alumno puede existir en Firestore sin ninguna
+      cuenta de Firebase Auth detrás — necesario para alumnos muy
+      pequeños o que decidan no usar la app, que igualmente deben
+      poder ser matriculados y puntuados por un profesor. Verificado
+      que **no hace falta ningún cambio de `firestore.rules`**: la
+      regla de creación de `usuarios` ya permite a dirección crear un
+      documento con cualquier id (no necesariamente un uid real de
+      Auth), y `matriculas`/`asistencias`/`notas`/`sesionesEstudio`
+      tratan `alumnoId` como una cadena opaca sin comprobar que
+      corresponda a una cuenta real.
+    - `AuthService.crearAlumnoSinCuenta()`: a diferencia de
+      `crearAlumno()`, no toca Firebase Auth en absoluto — escribe
+      directamente en `usuarios` con un id autogenerado de Firestore
+      (`_db.collection('usuarios').doc()`). `CrearAlumnoScreen` ganó
+      un `SwitchListTile` para elegir qué camino usar (oculta el campo
+      de email cuando está desactivado). `AlumnosScreen`/
+      `AlumnoPerfilScreen` muestran "Sin acceso a la app" cuando
+      `!tieneCuenta`. **Limitación conocida, no resuelta**: no hay
+      forma de "convertir" después un alumno sin cuenta en uno con
+      cuenta real (un uid de Auth no se puede fijar a mano) sin migrar
+      a mano todas sus matrículas/notas/asistencias a un uid nuevo.
+    - **Importación masiva**: plantilla FIJA de 2 hojas
+      (`lib/utils/excel_plantilla_importacion.dart`,
+      `generarPlantillaImportacion()`/`parsearPlantillaImportacion()`)
+      — deliberadamente NO se intenta adivinar el formato de una hoja
+      ya existente de dirección, se le pide copiar sus datos a este
+      formato conocido una vez. Hoja "Cursos y asignaturas" (Curso,
+      Asignatura, Instrumento Sí/No, objetivos semanal/mensual
+      opcionales) y hoja "Alumnos y matrículas" (Nombre, Apellidos,
+      Email opcional, Curso, Asignatura, Días de clase opcionales) —
+      **una fila por combinación alumno+asignatura**, no listas
+      separadas por comas. Nueva pantalla dirección-only
+      `ImportarDatosScreen`: descarga la plantilla, sube el archivo
+      relleno (`file_picker`, ya usado en el proyecto), valida que
+      toda asignatura mencionada en la hoja de alumnos exista en la
+      hoja de cursos (bloquea la importación si no), previsualiza
+      recuentos, y al confirmar crea secuencialmente
+      cursos→asignaturas→alumnos→matrículas (sin Cloud Functions, todo
+      desde cliente). Cursos/asignaturas que YA existan con el mismo
+      nombre (comparación recortada y en minúsculas) se REUTILIZAN, no
+      se duplican — permite reimportar el mismo archivo actualizado.
+      Un alumno ya existente solo se detecta por **email exacto**
+      (`DbService.obtenerUsuarioPorEmail`, nuevo); dos alumnos sin
+      email y mismo nombre+apellidos se crean como registros
+      DISTINTOS — limitación conocida, visible en la previsualización
+      antes de confirmar. Alumnos con email nuevo generan contraseña
+      temporal (descargable en CSV al terminar, mismo patrón que
+      `RegistroHorarioScreen`); alumnos sin email usan
+      `crearAlumnoSinCuenta`.
+
+58. **Modo desarrollador + apartado de incidencias** (Edgar necesita
+    poder probar la app "como" cada rol sin mantener varias cuentas de
+    prueba, y un sitio donde cualquiera reporte problemas/sugerencias).
+    - **Por qué la simulación de rol tiene que narrear `Usuario.permisos`,
+      no ser solo una etiqueta visual**: el modelo de permisos ya es
+      combinable (una cuenta puede tener `{alumno, profesor, direccion}`
+      a la vez) y `home_shell.dart` ya renderiza TODAS las secciones
+      combinadas en el mismo drawer para una cuenta así — nunca una
+      vista aislada de un rol. Además la navegación del punto 55
+      depende de la combinación EXACTA de permisos
+      (`perfil.esProfesor && !perfil.esDireccion`), no solo de su
+      presencia. Por eso la cuenta de Edgar tiene los 4 permisos A LA
+      VEZ en Firestore (`alumno`, `profesor`, `direccion`,
+      `desarrollador` — este último fijado A MANO por consola,
+      igual que ya es manual la creación de cuentas de dirección,
+      nunca ofrecido en ninguna pantalla de alta de cuentas), y el
+      "modo de vista" construye, SOLO en el cliente, una copia de
+      `Usuario` con `permisos` reducido al rol simulado
+      (`Usuario.copiarConPermisos`) — el documento real en Firestore
+      no se toca, así que las reglas de seguridad (que evalúan
+      siempre `usuarioActual().permisos` real) siguen concediendo todo
+      lo que ese rol necesitaría de verdad.
+    - Único punto de aplicación: `main.dart`,
+      `_RaizAutenticacion.build()`, justo tras
+      `authService.obtenerPerfil(uid)` — construye `perfilMostrado`
+      (narrowed o no) y pasa TAMBIÉN `perfilReal` (el documento
+      completo, sin tocar) a `HomeShell`. Todo el resto de la app
+      sigue recibiendo `Usuario perfil` como siempre, sin cambios.
+    - `VistaPruebaService` (`lib/services/vista_prueba_service.dart`,
+      mismo patrón `ChangeNotifier`+`shared_preferences` que
+      `AjustesService`): `Permiso? vistaSimulada`, persistido
+      localmente por dispositivo (no por cuenta).
+    - `HomeShell` gana el parámetro `perfilReal` — el nuevo bloque de
+      drawer "Modo de vista"/"Incidencias" se gatea con
+      `perfilReal.esDesarrollador` (nunca con `perfil`, para que se
+      vea pase lo que pase esté simulando), colocado justo debajo de
+      la cabecera. La entrada "Informar de un problema o sugerencia"
+      (`ReportarIncidenciaScreen`) es visible para CUALQUIER usuario,
+      sin gateo, en el bloque "Herramientas" ya existente.
+    - `incidencias`: colección plana (sin subcolección, convención de
+      todo el proyecto), `comentarios` como lista embebida. Cualquiera
+      crea/lee/comenta las suyas; el desarrollador
+      (`esDesarrollador()`, nueva función en `firestore.rules`) lee y
+      gestiona TODAS. **El autor nunca puede resolver su propio
+      ticket** — la regla de `update` solo permite a `esDesarrollador()`
+      tocar `estado`; el autor solo puede añadir un comentario
+      (`comentarios.size()` +0/+1). Límite aceptado y documentado en
+      el propio `firestore.rules`: no se puede validar elemento a
+      elemento que los comentarios previos no se alteraron al añadir
+      uno nuevo (Firestore rules no tiene bucles/comparación de
+      prefijos de lista) — mismo nivel de confianza ya asumido hoy,
+      sin guardas, para `asignaturas.profesorIds` con `arrayUnion`.
+    - **Sin adjuntar imágenes ni email automático** (decisión
+      explícita): Firebase Storage exige plan Blaze desde finales de
+      2024 para proyectos nuevos, y sin Cloud Functions tampoco se
+      puede disparar un email real desde servidor — mismo motivo que
+      los puntos 5/6/13. Todo se gestiona dentro de la app; revisar si
+      se activa el plan Blaze más adelante.
+    - **Cuenta de prueba usada para probar este modo**: el propio
+      earbom@gmail.com, en la cuenta de prueba de dirección — Edgar la
+      usará para probar mientras el centro no esté en producción (el
+      perfil "real" de dirección del centro no lleva `desarrollador`).
+      Activar el permiso en esa cuenta sigue siendo un paso MANUAL en
+      la consola de Firebase (añadir `"desarrollador"` al array
+      `permisos` de su documento `usuarios/{uid}`) — no hay ni se ha
+      pedido un formulario para ello, igual que la creación de cuentas
+      de dirección (punto 6).
+
+59. **Reversión de `puedeGrabarEstudio`, cuadrícula mensual de horas,
+    agrupación visual de alumnos/roster, notas pendientes solo de nota
+    final, y Cuadro de Honor a un único criterio** (lote de ajustes
+    tras seguir probando la app; incluye un bug real de dos escrituras
+    sin `try/catch`).
+    - **`Usuario.puedeGrabarEstudio` revertido por completo** (campo,
+      `SwitchListTile` de `AlumnoPerfilScreen`, pin en
+      `firestore.rules` de `usuarios`/`sesionesEstudio`, y los 3 tests
+      de reglas que lo cubrían) — ver punto 55, ese sub-punto quedó
+      anotado como histórico. Dirección decidió que la discriminación
+      de acceso a grabar siga siendo únicamente por asignatura
+      (`Asignatura.permiteGrabarEstudio`, punto 41): todos los alumnos
+      con cuenta pueden grabar por defecto en cualquier asignatura que
+      lo permita.
+    - **Registro manual de horas: de semanal a MENSUAL, y de
+      lista+diálogo a cuadrícula editable.** `DbService.registrarHorasManualesSemana`
+      se sustituyó por `registrarHorasManualesMes` (mismo patrón de
+      `SesionEstudio` con `tipo: teorico` y
+      `duracionTotalMs == duracionEfectivaMs`, ver punto 53): busca
+      primero si ya existe una entrada manual de ese
+      alumno+asignatura+mes (consulta de dos igualdades ya "provably
+      compliant" — `alumnoId`+`asignaturaId` — filtrando en cliente por
+      mes y `registradoPorProfesorId` no nulo) y la actualiza en vez de
+      duplicarla. `lib/widgets/dialogo_registrar_horas.dart` (el
+      diálogo semanal, compartido entre `_FilaMatricula` y
+      `HorasAsignaturaScreen`) se ha borrado — ya no hace falta
+      compartirlo, el nuevo diálogo de edición es pequeño y vive
+      directo en `HorasAsignaturaScreen`. `_FilaMatricula`
+      (`asignatura_detalle_screen.dart`) perdió el icono "Registrar
+      horas de esta semana": la única vía para editar horas es ahora la
+      cuadrícula.
+    - **`HorasAsignaturaScreen` rediseñada como cuadrícula** (mismo
+      patrón `DataTable` que `NotasAsignaturaGridScreen`): filas =
+      alumnos matriculados, columnas = los 12 meses del curso escolar
+      mostrado (septiembre→agosto, vía `rangoDeCursoEscolar`), celda =
+      horas efectivas de ESE alumno en ESE mes para esta asignatura.
+      Celda coloreada verde/rojo contra `Asignatura.horasObjetivoMensual`
+      (0 = sin colorear). Si `!asignatura.permiteGrabarEstudio` la
+      celda es pulsable y abre un diálogo de horas que llama a
+      `registrarHorasManualesMes` (pre-rellenado si ya hay un valor
+      para editarlo in-place); si la asignatura SÍ permite grabar
+      (instrumento, horas reales grabadas con micrófono) la celda es de
+      solo lectura. Mantiene el `SelectorCursoEscolar` de siempre.
+    - **`firestore.rules`, `sesionesEstudio` `allow update`**: la rama
+      `esProfesor()` ya no exige que quien corrige sea EXACTAMENTE
+      `registradoPorProfesorId` del documento original — ahora exige
+      `esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId)`
+      (mismo permiso cruzado entre cursos que el `create`, punto 51),
+      así que cualquier profesor de esa asignatura —de cualquier
+      curso que comparta nombre— puede corregir un total equivocado,
+      no solo quien lo introdujo. El update sigue fijando
+      `registradoPorProfesorId == request.auth.uid` (deja constancia
+      de quién corrigió por última vez) y sigue bloqueando reetiquetar
+      alumno/asignatura/tipo. Tests de regresión en
+      `firestore-tests/rules.test.js` (corrección propia, cross-curso,
+      y de un profesor que no enseña esa asignatura).
+    - **Bug real: dos escrituras "fire-and-forget" sin `try/catch`
+      interrumpían la app** (reportado como "me saca al simulador y me
+      manda al IDE") — asignar un profesor a una asignatura desde
+      `ProfesorAsignaturasScreen` (`CheckboxListTile.onChanged`) y
+      registrar/corregir horas manuales. Sin stack trace exacto, la
+      causa concreta no se confirmó por lectura estática, pero CUALQUIER
+      excepción no capturada en una llamada async fuera de un
+      `try/catch` sale como no controlada, y en una sesión de debug
+      interrumpe la ejecución. Mitigado envolviendo ambos puntos en
+      `try/catch` + `SnackBar` de error: deja de interrumpir la app Y
+      además muestra el mensaje real en pantalla si vuelve a fallar.
+      **No confirmado como causa raíz** — si el problema reaparece con
+      un mensaje de error visible en el `SnackBar`, ese texto es la
+      pista a seguir.
+    - **`AlumnosScreen`, agrupación por letra**: `_ListaAlfabetica` ya
+      no es un `ListView.separated` plano — inserta una cabecera en
+      negrita (`A`, `B`, `C`...) cada vez que cambia la primera letra
+      de `_claveOrden` (apellido, o nombre de respaldo) en la lista ya
+      ordenada, mismo patrón visual que la extinta
+      `_ListaAgrupadaPorInstrumento` del Cuadro de Honor.
+    - **Roster de `AsignaturaDetalleScreen`, agrupación por profesor**:
+      nuevo `_ListaMatriculasPorProfesor` agrupa las filas por
+      `matricula.profesorId` (resuelto a nombre vía `obtenerUsuario`,
+      "Sin profesor asignado" siempre al final), con cabeceras
+      ordenadas alfabéticamente por el nombre resuelto — a diferencia
+      del listado de alumnos, aquí NO se desglosa además por letra
+      (decisión explícita de dirección). `_FilaMatricula` en sí no se
+      tocó.
+    - **Notas pendientes: ya no se valida nota por nota.**
+      `NotasPendientesScreen` pasó de listar `Nota` individuales (con
+      selección múltiple) a agrupar `notasPendientesSupervision()` por
+      `(alumnoId, asignaturaId)`; cada grupo solo se muestra cuando el
+      alumno ya tiene una nota (de cualquier estado) para TODOS los
+      `criteriosEvaluacion` de esa asignatura — mientras falte alguno,
+      ese alumno·asignatura no aparece. Cuando está completo, se
+      calcula la nota ponderada (`Σ valor × peso/100`, con la nota MÁS
+      RECIENTE de cada criterio — mismo cálculo que `_TabNotas`) y se
+      muestra una única fila con 2 botones que llaman a
+      `actualizarEstadoNotas` sobre las notas PENDIENTES de ese grupo
+      (ya existía, `WriteBatch`) — sin tocar el modelo `Nota` ni
+      `firestore.rules`.
+    - **Cuadro de Honor: un único criterio (curso → asignatura)** — ver
+      también la anotación del punto 55.
+      `_ModoCuadroHonor`/`SegmentedButton`/filtro/`_ListaPlana`/
+      `_ListaAgrupadaPorInstrumento`/`_ListaAgrupadaPorCurso` se
+      eliminaron; `DbService.cuadroDeHonorMensual()` (sin consumidores
+      tras esto) también se eliminó —
+      `DbService.horasPorAsignaturaMensual()` (agregación por
+      asignatura, ya existente) queda como única fuente. El reporte de
+      "no veo nombres en el ranking" se revisó: la agregación ya
+      llevaba el blindaje anti-sobrescritura del punto 50, así que con
+      toda probabilidad eran sesiones de ejemplo creadas a mano en la
+      consola de Firestore (sin pasar por `guardarSesion`, que es quien
+      denormaliza `alumnoNombre`), no un fallo de la app.
+
+60. **Modo desarrollador: cambiar de vista simulada no tenía ningún
+    efecto** (reportado tras probar la APK — al elegir Alumno/
+    Profesor/Dirección en "Modo de vista", tanto el subtítulo como el
+    menú se quedaban permanentemente en "Viendo con todos mis
+    permisos", como si no se simulara nada). Dos causas superpuestas,
+    la segunda es la que de verdad bloqueaba todo — el primer intento
+    de arreglo (una `key` en `HomeShell`) era una mejora real pero NO
+    la causa raíz, se comprobó con un test que reproducía el `Drawer`
+    de verdad:
+    - (Mejora real, no la causa raíz) `HomeShell` es un
+      `StatefulWidget` cuyo `_HomeShellState` cachea la pantalla actual
+      (`_cuerpo`) y el título — asignados SOLO en `initState()`. Sin
+      una `key` que cambie con el rol simulado, Flutter reutiliza el
+      mismo `State` en vez de crear uno nuevo al cambiar `perfil`.
+      Arreglado dándole a `HomeShell` una `key: ValueKey(claveVista)`
+      (`claveVista` = nombres de `permisos` del perfil mostrado,
+      ordenados y unidos por comas) en `_RaizAutenticacion`
+      (`main.dart`): fuerza un `State`/`initState` nuevo en cada
+      cambio de combinación de permisos mostrada.
+    - **Causa raíz real**: `_abrirSelectorDeVista` (antes en
+      `home_shell.dart`) recibía como parámetro el `BuildContext` del
+      propio `ListTile` que abre el selector — un widget que vive
+      DENTRO del `Drawer`. Empezaba con `Navigator.pop(context)` para
+      cerrar el drawer, y SOLO DESPUÉS mostraba el diálogo
+      (`showDialog`) y esperaba a que el usuario eligiera. El problema:
+      `DrawerControllerState`, en cuanto termina su animación de
+      cierre (~250ms), sustituye TODO su contenido por
+      `SizedBox.shrink()` — es decir, desmonta por completo el
+      `ListTile` (y su `context`) del árbol de widgets. Como un
+      usuario tarda bastante más de 250ms en mirar el diálogo y tocar
+      una opción, para cuando `showDialog` se resolvía,
+      `context.mounted` YA daba `false` — así que el
+      `if (!context.mounted) return;` de después abortaba SIEMPRE, y
+      `vistaPrueba.cambiarVista(elegida)` nunca llegaba a ejecutarse,
+      por mucho que el usuario eligiera. Arreglado quitando el
+      parámetro `context` de `_abrirSelectorDeVista` y usando en su
+      lugar el `context`/`mounted` de la propia `_HomeShellState`
+      (el del `Scaffold`, que vive mientras la pantalla esté abierta,
+      no se desmonta al cerrar el drawer). **Lección para cualquier
+      acción async iniciada desde un `ListTile`/callback DENTRO de un
+      `Drawer` que cierre el drawer al empezar**: si esa acción tarda
+      más que la animación de cierre en resolverse (un diálogo, un
+      `await` a red...), no reutilizar el `context` del propio
+      `ListTile` después de cerrar el drawer — usar el `context` de la
+      pantalla contenedora (la State del `Scaffold`), que sigue
+      montado. Diagnosticado con un test de widgets que reproducía el
+      `Drawer` real (`Scaffold.openDrawer()` + cerrar + esperar a que
+      la animación termine antes de "elegir" en el diálogo) — un test
+      más simple sin `Drawer` real no lo detectaba, porque el bug
+      depende específicamente de ese desmontaje.
 
 ## Nomenclatura de colecciones (fija, no renombrar sin avisar)
 
 `usuarios`, `sesionesEstudio`, `modulos`, `ejercicios`,
 `ejerciciosCompletados`, `notas`, `estadisticasAlumno`, `cursos`,
 `asignaturas`, `matriculas`, `asistencias`, `criteriosEvaluacion`,
-`sustituciones`, `horariosLaborales`, `marcajes`, `configuracion`.
+`sustituciones`, `horariosLaborales`, `marcajes`, `configuracion`,
+`gruposAsignatura`, `incidencias`.
 
+- `usuarios.email` (nullable) y `usuarios.tieneCuenta` (bool, default
+  `true`) — un alumno sin cuenta de Firebase Auth (creado con
+  `AuthService.crearAlumnoSinCuenta`) no tiene email ni uid real
+  detrás — ver punto 57.
+- `incidencias.autorNombre` (denormalizado al crear, mismo patrón que
+  `sesionesEstudio.alumnoNombre`) y `incidencias.comentarios` (lista
+  embebida, no subcolección) — ver punto 58, modo desarrollador.
+- `asignaturas.nombreNormalizado` (`nombre.trim().toLowerCase()`,
+  derivado, no es un campo del modelo `Asignatura` en Dart) y la
+  colección `gruposAsignatura/{nombreNormalizado}`
+  (`{ profesorIds: [...] }`, mantenida en cliente) — ver punto 51,
+  permiso cruzado entre cursos.
 - `sesionesEstudio.asignaturaId` (nullable): a qué asignatura
   pertenece la sesión; `null` solo aparece en sesiones antiguas de
   antes del punto 41 (práctica libre, ya retirada) — una sesión nueva
@@ -903,6 +1540,10 @@ dirección — un almacén local en el centro no sirve.
   Cuadro de Honor pueda mostrar el nombre de OTROS alumnos sin que
   cada uno necesite permiso de lectura sobre el `usuarios` ajeno — ver
   punto 42.
+- `sesionesEstudio.registradoPorProfesorId` (nullable, sí es un campo
+  del modelo `SesionEstudio` en Dart, a diferencia de `alumnoNombre`):
+  identifica una sesión de horas de teoría anotada a mano por un
+  profesor, no grabada por el alumno — ver punto 53.
 - `asignaturas.permiteGrabarEstudio` (bool, `false` por defecto) — ver
   punto 41.
 - `notas.asignaturaId` (antes `notas.asignatura`, texto libre): ahora
@@ -918,7 +1559,11 @@ dirección — un almacén local en el centro no sirve.
   `cursos.nivel`/`cursos.numeroCurso` y `cursos.iconoId` — ver puntos
   17, 20 y 29. `asignaturas.iconoId` (string, `''` = icono por
   defecto) sigue viviendo en `Asignatura` — solo el objetivo de horas
-  se movió a `Curso`, el icono no.
+  del punto 17 se movió a `Curso`, el icono no.
+- `asignaturas.horasObjetivoSemanal`/`horasObjetivoMensual` (double, 0
+  = sin objetivo) — objetivo de horas MÁS FINO, por asignatura, que
+  coexiste con `cursos.horasObjetivoMensual` sin sustituirlo — ver
+  punto 52.
 - `asistencias.retraso` (bool, `false` por defecto) — ver punto 18.
 - `marcajes.pendienteValidacion` (bool, `false` por defecto) — ver
   punto 32.
@@ -926,6 +1571,9 @@ dirección — un almacén local en el centro no sirve.
   `DbService.registrarVisitaYObtenerAnterior`): no forma parte del
   modelo `Usuario` en Dart, solo se usa para calcular avisos in-app
   (ver punto 13).
+- `usuarios.puedeGrabarEstudio` (bool, `true` por defecto, sí es un
+  campo del modelo `Usuario` en Dart): permiso global por alumno para
+  usar la grabación de estudio con micrófono — ver punto 55.
 - Sin `centroId` en `cursos`/`asignaturas`: piloto de un solo centro.
   Si se onboardea un segundo centro, añadir `centroId` y filtrar
   `alumnosDelCentro()`/`profesoresDelCentro()` en `db_service.dart`
@@ -1029,7 +1677,35 @@ sesiones de login, no de práctica musical, y crea confusión si reaparece.
   a asignaturas de instrumento marcadas explícitamente por dirección,
   sin práctica libre (ver punto 41); Cuadro de Honor funcionando para
   el rol alumno (ver punto 42); icono de la app con la marca "oh" en
-  todas las plataformas (ver punto 44).
+  todas las plataformas (ver punto 44); navegación principal invertida
+  a asignatura-primero-curso-dentro para dirección y profesor (ver
+  punto 46, `AsignaturasPorNombreScreen`); marcar asistencia desde
+  "Alumnos" para profesor, scope seguro por asignatura (ver punto 47,
+  `AlumnoAsistenciaHoyScreen`); cuadrícula de notas por asignatura (ver
+  punto 48, `NotasAsignaturaGridScreen`); colores de asistencia en el
+  calendario del alumno (ver punto 49); bug de nombres en blanco del
+  Cuadro de Honor arreglado (ver punto 50); alumnos en orden alfabético
+  por apellidos sin agrupar por curso; permiso cruzado entre cursos
+  por nombre de asignatura vía `gruposAsignatura` (ver punto 51);
+  menú "Asignaturas" renombrado y tamaño de letra ampliado hasta 1.6×;
+  objetivo de horas configurable por asignatura desde Criterios de
+  evaluación (ver punto 52); registro manual de horas de teoría por el
+  profesor (ver punto 53); Cuadro de Honor por bloques de curso y
+  asignatura, visible para todos (ver punto 54); notas pendientes
+  visibles por criterio, excepción de grabación por alumno,
+  navegación por secciones (Asistencias/Notas/Horas) para profesor
+  puro y fusión de Ranking en Horas de estudio con Cuadro de Honor por
+  bloques personalizable (ver punto 55); volver a un curso escolar
+  anterior y eliminarlo del historial con avisos (ver punto 56);
+  alumnos sin cuenta de acceso e importación masiva desde plantilla
+  Excel (ver punto 57, `ImportarDatosScreen`); modo desarrollador con
+  simulación de rol y apartado de incidencias (ver punto 58); reversión
+  del acceso a grabación por alumno (vuelve a ser solo por asignatura),
+  cuadrícula mensual editable de horas de estudio, alumnos agrupados
+  por letra inicial, roster de asignatura agrupado por profesor, notas
+  pendientes reducidas a validar solo la nota final por criterios
+  completos, y Cuadro de Honor con un único criterio (curso →
+  asignatura) — ver punto 59.
 - Pantallas pendientes: registro público de alumno (hoy solo dirección
   da de alta, ver punto 6), ejercicios.
 - Creación de cuentas de **dirección** sigue siendo manual por consola

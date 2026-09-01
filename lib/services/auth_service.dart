@@ -94,6 +94,7 @@ class AuthService {
   /// migrar esto a una Cloud Function invocable con Admin SDK.
   Future<String> _crearUsuarioConPermiso({
     required String nombre,
+    String? apellidos,
     required String email,
     required Permiso permiso,
     String? instrumento,
@@ -115,6 +116,7 @@ class AuthService {
       final usuario = Usuario(
         uid: uid,
         nombre: nombre,
+        apellidos: apellidos,
         email: email,
         permisos: {permiso},
         instrumento: instrumento,
@@ -131,17 +133,48 @@ class AuthService {
 
   Future<String> crearAlumno({
     required String nombre,
+    String? apellidos,
     required String email,
     String? instrumento,
     String? centroId,
   }) {
     return _crearUsuarioConPermiso(
       nombre: nombre,
+      apellidos: apellidos,
       email: email,
       permiso: Permiso.alumno,
       instrumento: instrumento,
       centroId: centroId,
     );
+  }
+
+  /// Alumno SIN cuenta de acceso (no usará la app: muy joven, o
+  /// decide no hacerlo) — igualmente matriculable y puntuable por un
+  /// profesor. A diferencia de `crearAlumno`, no toca Firebase Auth en
+  /// absoluto: escribe directamente el documento en `usuarios` con un
+  /// ID autogenerado de Firestore — las reglas ya permiten a
+  /// dirección crear un documento en `usuarios` con cualquier id, no
+  /// necesariamente un uid real de Auth. Ver CLAUDE.md.
+  Future<String> crearAlumnoSinCuenta({
+    required String nombre,
+    String? apellidos,
+    String? instrumento,
+    String? centroId,
+  }) async {
+    final ref = _db.collection('usuarios').doc();
+    final usuario = Usuario(
+      uid: ref.id,
+      nombre: nombre,
+      apellidos: apellidos,
+      email: null,
+      permisos: {Permiso.alumno},
+      instrumento: instrumento,
+      centroId: centroId,
+      createdAt: DateTime.now(),
+      tieneCuenta: false,
+    );
+    await ref.set(usuario.toMap());
+    return ref.id;
   }
 
   Future<String> crearProfesor({

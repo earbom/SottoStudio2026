@@ -11,6 +11,7 @@ import 'services/auth_service.dart';
 import 'services/tema_service.dart';
 import 'services/ajustes_service.dart';
 import 'services/navegacion_observer.dart';
+import 'services/vista_prueba_service.dart';
 import 'screens/comunes/login_screen.dart';
 import 'screens/comunes/home_shell.dart';
 import 'tema.dart';
@@ -26,6 +27,7 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => TemaService()),
         ChangeNotifierProvider(create: (_) => AjustesService()),
+        ChangeNotifierProvider(create: (_) => VistaPruebaService()),
       ],
       child: const SottoStudioApp(),
     ),
@@ -120,7 +122,37 @@ class _RaizAutenticacion extends StatelessWidget {
             if (!snapshotPerfil.hasData) {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
-            return HomeShell(perfil: snapshotPerfil.data!);
+            final real = snapshotPerfil.data!;
+            // Modo desarrollador (ver CLAUDE.md): si la cuenta REAL
+            // tiene el permiso `desarrollador` y hay una vista
+            // simulada elegida, se construye una copia de `perfil` con
+            // los permisos reducidos a ese único rol — el documento
+            // real en Firestore conserva TODOS sus permisos para que
+            // las reglas de seguridad sigan concediendo todo lo que
+            // ese rol necesitaría de verdad. `perfilReal` se pasa
+            // aparte para que HomeShell pueda mostrar el propio
+            // selector de vista y el panel de incidencias pase lo que
+            // pase esté simulando.
+            final vistaSimulada = context.watch<VistaPruebaService>().vistaSimulada;
+            final perfilMostrado = (real.esDesarrollador && vistaSimulada != null)
+                ? real.copiarConPermisos({vistaSimulada})
+                : real;
+            // HomeShell es un StatefulWidget que cachea en su State la
+            // pantalla actual (_cuerpo) y el título, asignados solo en
+            // initState — sin una key que cambie con el rol simulado,
+            // Flutter reutiliza el mismo State al cambiar de vista (modo
+            // desarrollador) y esos campos quedan congelados con el
+            // perfil viejo, aunque el resto del build sí se refresca (de
+            // ahí que el body/Inicio no cambiara al simular otro rol).
+            // Una key distinta por combinación de permisos fuerza un
+            // State — y por tanto un initState — nuevo en cada cambio.
+            final claveVista =
+                (perfilMostrado.permisos.map((p) => p.name).toList()..sort()).join(',');
+            return HomeShell(
+              key: ValueKey(claveVista),
+              perfil: perfilMostrado,
+              perfilReal: real,
+            );
           },
         );
       },

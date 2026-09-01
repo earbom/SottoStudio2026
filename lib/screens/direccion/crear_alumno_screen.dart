@@ -17,10 +17,19 @@ class _CrearAlumnoScreenState extends State<CrearAlumnoScreen> {
   final _instrumentoCtrl = TextEditingController();
   String? _error;
   bool _cargando = false;
+  // Algunos alumnos (muy jóvenes, o que deciden no usarla) no
+  // necesitan poder iniciar sesión — igualmente deben constar en la
+  // base de datos para que un profesor pueda puntuarlos/marcar su
+  // asistencia. Ver CLAUDE.md.
+  bool _tieneCuenta = true;
 
   Future<void> _crear() async {
-    if (_nombreCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'Nombre y email son obligatorios.');
+    if (_nombreCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'El nombre es obligatorio.');
+      return;
+    }
+    if (_tieneCuenta && _emailCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'El email es obligatorio si el alumno tendrá acceso a la app.');
       return;
     }
     setState(() {
@@ -28,19 +37,22 @@ class _CrearAlumnoScreenState extends State<CrearAlumnoScreen> {
       _error = null;
     });
     try {
-      final nombreCompleto = [
-        _nombreCtrl.text.trim(),
-        _apellidosCtrl.text.trim(),
-      ].where((s) => s.isNotEmpty).join(' ');
-
-      final password = await _authService.crearAlumno(
-        nombre: nombreCompleto,
-        email: _emailCtrl.text.trim(),
-        instrumento: _instrumentoCtrl.text.trim().isEmpty ? null : _instrumentoCtrl.text.trim(),
-      );
-
-      if (!mounted) return;
-      await _mostrarPasswordGenerada(password);
+      if (_tieneCuenta) {
+        final password = await _authService.crearAlumno(
+          nombre: _nombreCtrl.text.trim(),
+          apellidos: _apellidosCtrl.text.trim().isEmpty ? null : _apellidosCtrl.text.trim(),
+          email: _emailCtrl.text.trim(),
+          instrumento: _instrumentoCtrl.text.trim().isEmpty ? null : _instrumentoCtrl.text.trim(),
+        );
+        if (!mounted) return;
+        await _mostrarPasswordGenerada(password);
+      } else {
+        await _authService.crearAlumnoSinCuenta(
+          nombre: _nombreCtrl.text.trim(),
+          apellidos: _apellidosCtrl.text.trim().isEmpty ? null : _apellidosCtrl.text.trim(),
+          instrumento: _instrumentoCtrl.text.trim().isEmpty ? null : _instrumentoCtrl.text.trim(),
+        );
+      }
       if (!mounted) return;
       Navigator.pop(context);
     } catch (e) {
@@ -109,11 +121,25 @@ class _CrearAlumnoScreenState extends State<CrearAlumnoScreen> {
                   decoration: const InputDecoration(labelText: 'Apellidos'),
                 ),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email (real, del alumno o tutor)'),
-                  keyboardType: TextInputType.emailAddress,
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Este alumno podrá acceder a la app (tiene email)'),
+                  subtitle: const Text(
+                    'Desactívalo para alumnos que no vayan a usar la app (muy '
+                    'jóvenes, o que decidan no hacerlo) — igualmente podrá ser '
+                    'matriculado y puntuado por un profesor.',
+                  ),
+                  value: _tieneCuenta,
+                  onChanged: (v) => setState(() => _tieneCuenta = v),
                 ),
+                if (_tieneCuenta) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _emailCtrl,
+                    decoration: const InputDecoration(labelText: 'Email (real, del alumno o tutor)'),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextField(
                   controller: _instrumentoCtrl,

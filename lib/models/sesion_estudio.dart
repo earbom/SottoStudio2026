@@ -14,6 +14,10 @@ class SesionEstudio {
   final int duracionTotalMs;
   final int duracionEfectivaMs;
   final double? umbralDbUsado;
+  // null = grabada por el propio alumno (micrófono). Con valor = un
+  // profesor la anotó a mano (horas semanales de teoría recogidas de
+  // un cuaderno en papel, ver CLAUDE.md) — el uid de ESE profesor.
+  final String? registradoPorProfesorId;
 
   SesionEstudio({
     this.id,
@@ -26,6 +30,7 @@ class SesionEstudio {
     required this.duracionTotalMs,
     required this.duracionEfectivaMs,
     this.umbralDbUsado,
+    this.registradoPorProfesorId,
   });
 
   factory SesionEstudio.fromMap(String id, Map<String, dynamic> data) {
@@ -42,6 +47,7 @@ class SesionEstudio {
       duracionTotalMs: data['duracionTotalMs'] ?? 0,
       duracionEfectivaMs: data['duracionEfectivaMs'] ?? 0,
       umbralDbUsado: (data['umbralDbUsado'] as num?)?.toDouble(),
+      registradoPorProfesorId: data['registradoPorProfesorId'],
     );
   }
 
@@ -56,6 +62,7 @@ class SesionEstudio {
       'duracionTotalMs': duracionTotalMs,
       'duracionEfectivaMs': duracionEfectivaMs,
       'umbralDbUsado': umbralDbUsado,
+      'registradoPorProfesorId': registradoPorProfesorId,
     };
   }
 }

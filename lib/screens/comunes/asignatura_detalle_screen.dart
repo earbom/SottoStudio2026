@@ -9,17 +9,19 @@ import '../../widgets/selector_curso_escolar.dart';
 import '../direccion/criterios_evaluacion_screen.dart';
 import '../direccion/sustituciones_screen.dart';
 import 'alumno_en_asignatura_screen.dart';
-import 'ranking_asignatura_screen.dart';
+import 'horas_asignatura_screen.dart';
+import 'notas_asignatura_grid_screen.dart';
 
 const nombresDiasSemana = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 /// Diálogo para configurar la matrícula de UN alumno en esta
-/// asignatura: días de clase semanales y qué profesor concreto le
-/// corresponde. Es por alumno (no por asignatura) porque las clases
-/// de instrumento suelen ser individuales, y una asignatura puede
-/// tener varios profesores con alumnos distintos (p.ej. dos de
-/// guitarra) — solo el profesor aquí asignado puede poner notas o
-/// marcar asistencia de este alumno (ver Sustitucion para bajas).
+/// asignatura: días de clase semanales y qué profesor de referencia
+/// le corresponde. Es por alumno (no por asignatura) porque las clases
+/// de instrumento suelen ser individuales. Desde el permiso cruzado
+/// entre cursos (ver CLAUDE.md), este campo es solo informativo —
+/// CUALQUIER profesor de la asignatura (de cualquier curso que
+/// comparta nombre) puede poner notas o marcar asistencia de
+/// cualquier alumno, no solo el aquí asignado.
 Future<({List<int> dias, String profesorId})?> _configurarMatricula(
   BuildContext context, {
   required List<Usuario> profesoresDeLaAsignatura,
@@ -54,7 +56,8 @@ Future<({List<int> dias, String profesorId})?> _configurarMatricula(
                 }),
               ),
               const SizedBox(height: 16),
-              const Text('Profesor asignado'),
+              const Text(
+                  'Profesor de referencia (informativo — ya no restringe quién puede puntuar)'),
               if (profesoresDeLaAsignatura.isEmpty)
                 const Text('Esta asignatura no tiene profesores todavía.',
                     style: TextStyle(fontStyle: FontStyle.italic))
@@ -275,22 +278,38 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
               ),
             ),
             actions: [
-              // Ranking: nunca para alumno (vería nombres/rendimiento de
-              // compañeros menores de edad). Esta pantalla en la práctica
-              // solo la abren profesor/dirección, pero se comprueba aquí
-              // también por si cambia la navegación en el futuro.
-              if (widget.perfil.esDireccion || widget.perfil.esProfesor)
+              // Horas de estudio: nunca para alumno (vería nombres/
+              // rendimiento de compañeros menores de edad). Esta
+              // pantalla en la práctica solo la abren profesor/
+              // dirección, pero se comprueba aquí también por si
+              // cambia la navegación en el futuro.
+              if (widget.perfil.esDireccion || widget.perfil.esProfesor) ...[
                 IconButton(
-                  icon: const Icon(Icons.emoji_events_outlined),
-                  tooltip: 'Ranking',
+                  icon: const Icon(Icons.timer_outlined),
+                  tooltip: 'Horas de estudio',
                   onPressed: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => RankingAsignaturaScreen(
+                      builder: (_) => HorasAsignaturaScreen(
                           asignatura: asignatura, perfil: widget.perfil),
                     ),
                   ),
                 ),
+                IconButton(
+                  icon: const Icon(Icons.grid_on_outlined),
+                  tooltip: 'Notas (cuadrícula)',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => NotasAsignaturaGridScreen(
+                        asignatura: asignatura,
+                        perfil: widget.perfil,
+                        cursoEscolar: cursoEfectivo,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               if (widget.perfil.esDireccion) ...[
                 IconButton(
                   icon: const Icon(Icons.rule_outlined),
@@ -340,35 +359,26 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
                             return const Center(
                                 child: CircularProgressIndicator());
                           }
-                          final esMio = !widget.perfil.esDireccion &&
-                              !(_sustitucionHoy && esActivo);
-                          final matriculas = esMio
-                              ? snapshot.data!
-                                  .where(
-                                      (m) => m.profesorId == widget.perfil.uid)
-                                  .toList()
-                              : snapshot.data!;
+                          // Ya no se filtra por profesorId == uid: con el
+                          // permiso cruzado entre cursos (ver CLAUDE.md),
+                          // cualquier profesor de esta asignatura (de
+                          // cualquier curso que comparta nombre) gestiona a
+                          // TODOS los matriculados, no solo a los que
+                          // matriculas.profesorId le fija (ese campo pasó a
+                          // ser informativo).
+                          final matriculas = snapshot.data!;
                           if (matriculas.isEmpty) {
-                            return Center(
-                              child: Text(esMio
-                                  ? 'No tienes alumnos asignados en esta asignatura todavía.'
-                                  : 'Aún no hay alumnos matriculados.'),
+                            return const Center(
+                              child: Text('Aún no hay alumnos matriculados.'),
                             );
                           }
-                          return ListView.separated(
-                            itemCount: matriculas.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, i) => _FilaMatricula(
-                              key: ValueKey(matriculas[i].id),
-                              matricula: matriculas[i],
-                              asignatura: asignatura,
-                              perfil: widget.perfil,
-                              db: _db,
-                              soloLectura: !esActivo,
-                              onEditarMatricula: () =>
-                                  _editarMatricula(matriculas[i]),
-                            ),
+                          return _ListaMatriculasPorProfesor(
+                            matriculas: matriculas,
+                            asignatura: asignatura,
+                            perfil: widget.perfil,
+                            db: _db,
+                            soloLectura: !esActivo,
+                            onEditarMatricula: _editarMatricula,
                           );
                         },
                       ),
@@ -382,6 +392,104 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
                   label: const Text('Matricular alumno'),
                 )
               : null,
+        );
+      },
+    );
+  }
+}
+
+/// Agrupa el roster de una asignatura por profesor asignado
+/// (`matricula.profesorId`, ya puramente informativo desde el permiso
+/// cruzado entre cursos — ver CLAUDE.md), con cabeceras ordenadas
+/// alfabéticamente por el nombre resuelto del profesor ("Sin profesor
+/// asignado" siempre al final). A diferencia del listado de alumnos
+/// (item 1), aquí NO se desglosa además por letra — dirección lo
+/// confirmó así.
+class _ListaMatriculasPorProfesor extends StatelessWidget {
+  final List<Matricula> matriculas;
+  final Asignatura asignatura;
+  final Usuario perfil;
+  final DbService db;
+  final bool soloLectura;
+  final void Function(Matricula) onEditarMatricula;
+
+  const _ListaMatriculasPorProfesor({
+    required this.matriculas,
+    required this.asignatura,
+    required this.perfil,
+    required this.db,
+    required this.soloLectura,
+    required this.onEditarMatricula,
+  });
+
+  // Mismo criterio que _ListaAlfabetica en alumnos_screen.dart: ordena
+  // por apellidos, con el nombre como respaldo para cuentas antiguas
+  // sin apellidos.
+  String _claveOrdenAlumno(Usuario u) =>
+      (u.apellidos != null && u.apellidos!.isNotEmpty) ? u.apellidos! : u.nombre;
+
+  @override
+  Widget build(BuildContext context) {
+    final idsProfesor = matriculas.map((m) => m.profesorId).where((id) => id.isNotEmpty).toSet();
+    final idsAlumno = matriculas.map((m) => m.alumnoId).toSet();
+    return FutureBuilder<({List<Usuario?> profesores, List<Usuario?> alumnos})>(
+      future: Future.wait([
+        Future.wait(idsProfesor.map((id) => db.obtenerUsuario(id))),
+        Future.wait(idsAlumno.map((id) => db.obtenerUsuario(id))),
+      ]).then((r) => (profesores: r[0], alumnos: r[1])),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final nombrePorId = <String, String>{
+          for (final p in snap.data!.profesores.whereType<Usuario>()) p.uid: p.nombre,
+        };
+        final alumnoPorId = <String, Usuario>{
+          for (final a in snap.data!.alumnos.whereType<Usuario>()) a.uid: a,
+        };
+
+        final grupos = <String, List<Matricula>>{};
+        for (final m in matriculas) {
+          final clave = m.profesorId.isEmpty ? '' : (nombrePorId[m.profesorId] ?? m.profesorId);
+          (grupos[clave] ??= []).add(m);
+        }
+        for (final lista in grupos.values) {
+          lista.sort((a, b) {
+            final alumnoA = alumnoPorId[a.alumnoId];
+            final alumnoB = alumnoPorId[b.alumnoId];
+            final claveA = alumnoA == null ? a.alumnoId : _claveOrdenAlumno(alumnoA);
+            final claveB = alumnoB == null ? b.alumnoId : _claveOrdenAlumno(alumnoB);
+            return claveA.compareTo(claveB);
+          });
+        }
+        final claves = grupos.keys.toList()
+          ..sort((a, b) {
+            if (a.isEmpty) return 1;
+            if (b.isEmpty) return -1;
+            return a.compareTo(b);
+          });
+
+        return ListView(
+          children: [
+            for (final clave in claves) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Text(clave.isEmpty ? 'Sin profesor asignado' : clave,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              ),
+              for (final matricula in grupos[clave]!)
+                _FilaMatricula(
+                  key: ValueKey(matricula.id),
+                  matricula: matricula,
+                  asignatura: asignatura,
+                  perfil: perfil,
+                  db: db,
+                  soloLectura: soloLectura,
+                  onEditarMatricula: () => onEditarMatricula(matricula),
+                ),
+              const Divider(height: 1),
+            ],
+          ],
         );
       },
     );

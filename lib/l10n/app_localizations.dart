@@ -173,8 +173,14 @@ abstract class AppLocalizations {
   /// No description provided for @menuCursosAsignaturas.
   ///
   /// In es, this message translates to:
-  /// **'Cursos y asignaturas'**
+  /// **'Asignaturas'**
   String get menuCursosAsignaturas;
+
+  /// No description provided for @menuGestionarCursos.
+  ///
+  /// In es, this message translates to:
+  /// **'Gestionar cursos'**
+  String get menuGestionarCursos;
 
   /// No description provided for @menuAlumnos.
   ///
@@ -223,6 +229,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Curso escolar'**
   String get menuCursoEscolar;
+
+  /// No description provided for @menuImportarDatos.
+  ///
+  /// In es, this message translates to:
+  /// **'Importar datos desde Excel'**
+  String get menuImportarDatos;
 
   /// No description provided for @menuDocencia.
   ///
@@ -277,6 +289,30 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Cuadro de honor'**
   String get menuCuadroHonor;
+
+  /// No description provided for @menuReportarProblema.
+  ///
+  /// In es, this message translates to:
+  /// **'Informar de un problema o sugerencia'**
+  String get menuReportarProblema;
+
+  /// No description provided for @menuModoDesarrollador.
+  ///
+  /// In es, this message translates to:
+  /// **'Modo desarrollador'**
+  String get menuModoDesarrollador;
+
+  /// No description provided for @menuModoVista.
+  ///
+  /// In es, this message translates to:
+  /// **'Modo de vista'**
+  String get menuModoVista;
+
+  /// No description provided for @menuIncidencias.
+  ///
+  /// In es, this message translates to:
+  /// **'Incidencias'**
+  String get menuIncidencias;
 
   /// No description provided for @menuCambiarContrasena.
   ///

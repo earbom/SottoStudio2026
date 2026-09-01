@@ -54,11 +54,20 @@ class ProfesorAsignaturasScreen extends StatelessWidget {
                       ...entry.value.map((asignatura) => CheckboxListTile(
                             title: Text(asignatura.nombre),
                             value: asignatura.profesorIds.contains(profesor.uid),
-                            onChanged: (asignar) => db.asignarProfesorAAsignatura(
-                              asignaturaId: asignatura.id!,
-                              profesorId: profesor.uid,
-                              asignar: asignar == true,
-                            ),
+                            onChanged: (asignar) async {
+                              try {
+                                await db.asignarProfesorAAsignatura(
+                                  asignaturaId: asignatura.id!,
+                                  profesorId: profesor.uid,
+                                  asignar: asignar == true,
+                                );
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('No se pudo actualizar: $e')),
+                                );
+                              }
+                            },
                           )),
                     ],
                   );

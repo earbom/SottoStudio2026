@@ -47,7 +47,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get menuGestionCentro => 'Gestión del centro';
 
   @override
-  String get menuCursosAsignaturas => 'Cursos y asignaturas';
+  String get menuCursosAsignaturas => 'Asignaturas';
+
+  @override
+  String get menuGestionarCursos => 'Gestionar cursos';
 
   @override
   String get menuAlumnos => 'Alumnos';
@@ -72,6 +75,9 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get menuCursoEscolar => 'Curso escolar';
+
+  @override
+  String get menuImportarDatos => 'Importar datos desde Excel';
 
   @override
   String get menuDocencia => 'Docencia';
@@ -99,6 +105,18 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get menuCuadroHonor => 'Cuadro de honor';
+
+  @override
+  String get menuReportarProblema => 'Informar de un problema o sugerencia';
+
+  @override
+  String get menuModoDesarrollador => 'Modo desarrollador';
+
+  @override
+  String get menuModoVista => 'Modo de vista';
+
+  @override
+  String get menuIncidencias => 'Incidencias';
 
   @override
   String get menuCambiarContrasena => 'Cambiar contraseña';

@@ -14,7 +14,7 @@ class AjustesService extends ChangeNotifier {
   static const _claveIdioma = 'ajustes_idioma';
 
   static const double escalaFuenteMinima = 0.85;
-  static const double escalaFuenteMaxima = 1.3;
+  static const double escalaFuenteMaxima = 1.6;
   static const double escalaIconosMinima = 0.8;
   static const double escalaIconosMaxima = 1.4;
 

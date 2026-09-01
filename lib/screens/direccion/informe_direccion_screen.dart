@@ -15,7 +15,7 @@ import '../../widgets/selector_curso_escolar.dart';
 /// colorea en verde si lo alcanza y en rojo si no — sin objetivo
 /// definido no se colorea.
 class InformeDireccionScreen extends StatefulWidget {
-  InformeDireccionScreen({super.key});
+  const InformeDireccionScreen({super.key});
 
   @override
   State<InformeDireccionScreen> createState() => _InformeDireccionScreenState();
@@ -52,8 +52,10 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
   }
 
   Future<({Map<String, Usuario> alumnos, Map<String, List<Curso>> cursos})>
-      _cargarDatosAgrupacion(List<Map<String, dynamic>> filas, String cursoEscolar) async {
-    final cursosPorAlumno = await _db.cursosPorAlumno(cursoEscolar: cursoEscolar);
+      _cargarDatosAgrupacion(
+          List<Map<String, dynamic>> filas, String cursoEscolar) async {
+    final cursosPorAlumno =
+        await _db.cursosPorAlumno(cursoEscolar: cursoEscolar);
     final alumnos = <String, Usuario>{};
     for (final fila in filas) {
       final alumnoId = fila['alumnoId'] as String? ?? '';
@@ -99,20 +101,28 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
                     }
                     final filas = snapshot.data!;
                     if (filas.isEmpty) {
-                      return const Center(child: Text('Todavía no hay horas registradas.'));
+                      return const Center(
+                          child: Text('Todavía no hay horas registradas.'));
                     }
                     return FutureBuilder<
-                        ({Map<String, Usuario> alumnos, Map<String, List<Curso>> cursos})>(
+                        ({
+                          Map<String, Usuario> alumnos,
+                          Map<String, List<Curso>> cursos
+                        })>(
                       future: _cargarDatosAgrupacion(filas, cursoEscolar),
                       builder: (context, snapDatos) {
                         if (!snapDatos.hasData) {
-                          return const Center(child: CircularProgressIndicator());
+                          return const Center(
+                              child: CircularProgressIndicator());
                         }
                         final alumnosPorId = snapDatos.data!.alumnos;
                         final cursosPorAlumno = snapDatos.data!.cursos;
 
                         final grupos = <String,
-                            ({Curso? curso, List<Map<String, dynamic>> filas})>{};
+                            ({
+                          Curso? curso,
+                          List<Map<String, dynamic>> filas
+                        })>{};
                         for (final fila in filas) {
                           final alumnoId = fila['alumnoId'] as String? ?? '';
                           final cursos = cursosPorAlumno[alumnoId] ?? const [];
@@ -138,7 +148,8 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
                             if (a.curso == null) return 1;
                             if (b.curso == null) return -1;
                             return a.curso!.nivel.index != b.curso!.nivel.index
-                                ? a.curso!.nivel.index.compareTo(b.curso!.nivel.index)
+                                ? a.curso!.nivel.index
+                                    .compareTo(b.curso!.nivel.index)
                                 : (a.curso!.numeroCurso ?? 0)
                                     .compareTo(b.curso!.numeroCurso ?? 0);
                           });
@@ -147,7 +158,8 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
                           children: [
                             for (final entrada in entradas) ...[
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 16, 16, 4),
                                 child: Text(
                                   entrada.curso?.nombre ?? 'Sin matricular',
                                   style: Theme.of(context)
@@ -157,7 +169,8 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
                                 ),
                               ),
                               for (var i = 0; i < entrada.filas.length; i++)
-                                _filaInforme(context, entrada.filas[i], alumnosPorId, i),
+                                _filaInforme(
+                                    context, entrada.filas[i], alumnosPorId, i),
                               const Divider(height: 1),
                             ],
                           ],
@@ -184,13 +197,16 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
     return ListTile(
       leading: CircleAvatar(child: Text('${posicion + 1}')),
       title: Text(alumnosPorId[alumnoId]?.nombre ?? alumnoId),
-      subtitle:
-          tieneObjetivo ? Text('Objetivo mensual: ${objetivo.toStringAsFixed(1)} h') : null,
+      subtitle: tieneObjetivo
+          ? Text('Objetivo mensual: ${objetivo.toStringAsFixed(1)} h')
+          : null,
       trailing: Text(
         '$horas h / mes',
         style: TextStyle(
           fontWeight: FontWeight.bold,
-          color: !tieneObjetivo ? null : (cumpleObjetivo ? Colors.green : Colors.red),
+          color: !tieneObjetivo
+              ? null
+              : (cumpleObjetivo ? Colors.green : Colors.red),
         ),
       ),
     );

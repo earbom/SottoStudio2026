@@ -16,6 +16,14 @@ class Asignatura {
   // CLAUDE.md). Las asignaturas creadas antes de este campo no lo
   // tienen, así que quedan sin permiso hasta que dirección lo active.
   final bool permiteGrabarEstudio;
+  // Objetivo de horas de estudio POR ASIGNATURA (0 = sin objetivo,
+  // mismo criterio que Curso.horasObjetivoMensual). Un nivel más fino
+  // que el objetivo del curso: configurado por dirección desde
+  // CriteriosEvaluacionScreen, no cuenta para la nota — ver CLAUDE.md.
+  // Curso.horasObjetivoMensual NO desaparece, sigue usándose en
+  // informeDireccion()/el ranking global por curso.
+  final double horasObjetivoSemanal;
+  final double horasObjetivoMensual;
 
   Asignatura({
     this.id,
@@ -26,6 +34,8 @@ class Asignatura {
     required this.createdBy,
     this.iconoId = '',
     this.permiteGrabarEstudio = false,
+    this.horasObjetivoSemanal = 0,
+    this.horasObjetivoMensual = 0,
   });
 
   factory Asignatura.fromMap(String id, Map<String, dynamic> data) {
@@ -38,6 +48,8 @@ class Asignatura {
       createdBy: data['createdBy'] ?? '',
       iconoId: data['iconoId'] ?? '',
       permiteGrabarEstudio: data['permiteGrabarEstudio'] ?? false,
+      horasObjetivoSemanal: (data['horasObjetivoSemanal'] as num?)?.toDouble() ?? 0,
+      horasObjetivoMensual: (data['horasObjetivoMensual'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -45,11 +57,18 @@ class Asignatura {
     return {
       'cursoId': cursoId,
       'nombre': nombre,
+      // Denormalizado, no es un campo del modelo Dart (igual que
+      // Nota.fechaDia/cursoEscolar): permite a firestore.rules agrupar
+      // por nombre vía gruposAsignatura/{nombreNormalizado} para el
+      // permiso cruzado entre cursos (ver CLAUDE.md).
+      'nombreNormalizado': nombre.trim().toLowerCase(),
       'profesorIds': profesorIds,
       'createdAt': createdAt.toIso8601String(),
       'createdBy': createdBy,
       'iconoId': iconoId,
       'permiteGrabarEstudio': permiteGrabarEstudio,
+      'horasObjetivoSemanal': horasObjetivoSemanal,
+      'horasObjetivoMensual': horasObjetivoMensual,
     };
   }
 }

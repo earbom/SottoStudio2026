@@ -9,15 +9,16 @@ import '../../services/ajustes_service.dart';
 import '../../services/exportacion_automatica_marcajes_service.dart';
 import '../../widgets/logo_oh.dart';
 import '../direccion/cursos_screen.dart';
-import '../direccion/alumnos_screen.dart';
+import 'alumnos_screen.dart';
 import '../direccion/profesorado_screen.dart';
 import '../direccion/notas_pendientes_screen.dart';
 import '../direccion/asistencia_pendiente_screen.dart';
 import '../direccion/informe_direccion_screen.dart';
 import '../direccion/registro_horario_screen.dart';
 import '../direccion/curso_escolar_screen.dart';
+import '../direccion/importar_datos_screen.dart';
 import '../comunes/cuadro_de_honor_screen.dart';
-import '../profesor/dashboard_profesor_screen.dart';
+import 'asignaturas_por_nombre_screen.dart';
 import '../alumno/dashboard_alumno_screen.dart';
 import 'inicio_screen.dart';
 import 'cambiar_password_screen.dart';
@@ -25,13 +26,24 @@ import 'afinador_screen.dart';
 import 'metronomo_screen.dart';
 import 'fichajes_screen.dart';
 import 'ajustes_screen.dart';
+import 'reportar_incidencia_screen.dart';
+import 'gestionar_incidencias_screen.dart';
+import '../../services/vista_prueba_service.dart';
 
 /// Punto de entrada tras el login: menú lateral construido según los
 /// permisos del usuario (pueden combinarse, p.ej. dirección + profesor).
+///
+/// `perfil` puede ser una copia con los permisos reducidos a un único
+/// rol (modo desarrollador, "vista de prueba" — ver CLAUDE.md); todo
+/// este archivo sigue usando `perfil` sin cambios para las secciones
+/// por rol. `perfilReal` es SIEMPRE la cuenta real (con todos sus
+/// permisos), usada solo para decidir si mostrar el bloque de modo
+/// desarrollador, que debe verse pase lo que pase se esté simulando.
 class HomeShell extends StatefulWidget {
   final Usuario perfil;
+  final Usuario perfilReal;
 
-  const HomeShell({super.key, required this.perfil});
+  const HomeShell({super.key, required this.perfil, required this.perfilReal});
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -62,6 +74,75 @@ class _HomeShellState extends State<HomeShell> {
       _tituloActual = titulo;
       _cuerpo = pantalla;
     });
+  }
+
+  String _etiquetaVista(Permiso? vista) {
+    return switch (vista) {
+      null => 'Viendo con todos mis permisos',
+      Permiso.alumno => 'Viendo como: Alumno',
+      Permiso.profesor => 'Viendo como: Profesor',
+      Permiso.direccion => 'Viendo como: Dirección',
+      Permiso.desarrollador => 'Viendo con todos mis permisos',
+    };
+  }
+
+  // Sin parámetro `context`: usa el de esta State (el de HomeShell/
+  // Scaffold), NO el del ListTile que lo abre desde dentro del Drawer.
+  // Bug real (agosto 2026): el Drawer de Flutter desmonta POR COMPLETO
+  // su contenido en cuanto termina la animación de cierre
+  // (DrawerControllerState devuelve SizedBox.shrink() al cerrarse) —
+  // esa animación dura ~250ms, mucho menos que lo que tarda un usuario
+  // en mirar el diálogo y elegir una opción. Con el context del propio
+  // ListTile (dentro del Drawer), `context.mounted` ya daba `false`
+  // para cuando el diálogo se cerraba, así que el `if (!context.mounted)
+  // return;` de más abajo abortaba SIEMPRE y `cambiarVista()` nunca
+  // llegaba a ejecutarse — el selector parecía no hacer nada nunca.
+  // El context de la State del propio HomeShell/Scaffold, en cambio,
+  // sigue montado durante toda la vida de la pantalla. Test de
+  // regresión que reproduce el bug con el Drawer real (no solo con un
+  // ListTile suelto) documentado en el propio commit de este arreglo.
+  Future<void> _abrirSelectorDeVista() async {
+    final vistaPrueba = context.read<VistaPruebaService>();
+    Navigator.pop(context); // cierra el drawer
+    final elegida = await showDialog<Permiso?>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Modo de vista'),
+        children: [
+          RadioListTile<Permiso?>(
+            title: const Text('Todos mis permisos (sin simular)'),
+            value: null,
+            groupValue: vistaPrueba.vistaSimulada,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+          RadioListTile<Permiso?>(
+            title: const Text('Alumno'),
+            value: Permiso.alumno,
+            groupValue: vistaPrueba.vistaSimulada,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+          RadioListTile<Permiso?>(
+            title: const Text('Profesor'),
+            value: Permiso.profesor,
+            groupValue: vistaPrueba.vistaSimulada,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+          RadioListTile<Permiso?>(
+            title: const Text('Dirección'),
+            value: Permiso.direccion,
+            groupValue: vistaPrueba.vistaSimulada,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    // showDialog devuelve null tanto si se cancela (sin tocar nada)
+    // como si se elige "sin simular" (value: null) — no hay forma de
+    // distinguirlos con el tipo de retorno de RadioListTile, así que
+    // simplemente siempre se aplica la selección: cancelar equivale a
+    // dejarlo como estaba si no se tocó ninguna opción.
+    await vistaPrueba.cambiarVista(elegida);
   }
 
 
@@ -101,10 +182,37 @@ class _HomeShellState extends State<HomeShell> {
                         color: Theme.of(context).colorScheme.onPrimary,
                       ),
                     ),
-                    Text(perfil.email, style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
+                    Text(perfil.email ?? '', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
                   ],
                 ),
               ),
+              if (widget.perfilReal.esDesarrollador) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(l10n.menuModoDesarrollador, style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Consumer<VistaPruebaService>(
+                  builder: (context, vistaPrueba, _) => ListTile(
+                    leading: const Icon(Icons.visibility_outlined),
+                    title: Text(l10n.menuModoVista),
+                    subtitle: Text(_etiquetaVista(vistaPrueba.vistaSimulada)),
+                    onTap: _abrirSelectorDeVista,
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.bug_report_outlined),
+                  title: Text(l10n.menuIncidencias),
+                  onTap: () => _navegarA(l10n.menuIncidencias, const GestionarIncidenciasScreen()),
+                ),
+                const Divider(),
+              ],
+              if (perfil.esDireccion || perfil.esProfesor) ...[
+                ListTile(
+                  leading: const Icon(Icons.people_outline),
+                  title: Text(l10n.menuAlumnos),
+                  onTap: () => _navegarA(l10n.menuAlumnos, AlumnosScreen(perfil: perfil)),
+                ),
+              ],
               if (perfil.esDireccion) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -113,12 +221,13 @@ class _HomeShellState extends State<HomeShell> {
                 ListTile(
                   leading: const Icon(Icons.school_outlined),
                   title: Text(l10n.menuCursosAsignaturas),
-                  onTap: () => _navegarA(l10n.menuCursosAsignaturas, CursosScreen(perfil: perfil)),
+                  onTap: () =>
+                      _navegarA(l10n.menuCursosAsignaturas, AsignaturasPorNombreScreen(perfil: perfil)),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.people_outline),
-                  title: Text(l10n.menuAlumnos),
-                  onTap: () => _navegarA(l10n.menuAlumnos, const AlumnosScreen()),
+                  leading: const Icon(Icons.event_note_outlined),
+                  title: Text(l10n.menuGestionarCursos),
+                  onTap: () => _navegarA(l10n.menuGestionarCursos, CursosScreen(perfil: perfil)),
                 ),
                 ListTile(
                   leading: const Icon(Icons.co_present_outlined),
@@ -150,6 +259,11 @@ class _HomeShellState extends State<HomeShell> {
                   title: Text(l10n.menuCursoEscolar),
                   onTap: () => _navegarA(l10n.menuCursoEscolar, const CursoEscolarScreen()),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.upload_file_outlined),
+                  title: Text(l10n.menuImportarDatos),
+                  onTap: () => _navegarA(l10n.menuImportarDatos, const ImportarDatosScreen()),
+                ),
                 const Divider(),
               ],
               if (perfil.esProfesor) ...[
@@ -160,7 +274,8 @@ class _HomeShellState extends State<HomeShell> {
                 ListTile(
                   leading: const Icon(Icons.menu_book_outlined),
                   title: Text(l10n.menuMisAsignaturas),
-                  onTap: () => _navegarA(l10n.menuMisAsignaturas, DashboardProfesorScreen(perfil: perfil)),
+                  onTap: () =>
+                      _navegarA(l10n.menuMisAsignaturas, AsignaturasPorNombreScreen(perfil: perfil)),
                 ),
                 const Divider(),
               ],
@@ -214,6 +329,17 @@ class _HomeShellState extends State<HomeShell> {
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) => CuadroDeHonorScreen(perfil: perfil)));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.feedback_outlined),
+                title: Text(l10n.menuReportarProblema),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => ReportarIncidenciaScreen(perfil: perfil)),
+                  );
                 },
               ),
               const Divider(),

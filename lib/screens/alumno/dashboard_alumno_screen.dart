@@ -6,6 +6,7 @@ import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 import '../../utils/iconos_asignatura.dart';
 import '../comunes/alumno_en_asignatura_screen.dart';
+import 'empezar_estudio_screen.dart';
 import 'grabar_estudio_screen.dart';
 import 'historial_estudio_screen.dart';
 import 'mis_notas_screen.dart';
@@ -21,6 +22,14 @@ class DashboardAlumnoScreen extends StatelessWidget {
     return Scaffold(
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.mic_none_outlined),
+            title: const Text('Empezar estudio de instrumento'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => EmpezarEstudioScreen(perfil: perfil)),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.history),
             title: const Text('Historial de estudio'),
@@ -78,8 +87,9 @@ class DashboardAlumnoScreen extends StatelessWidget {
                               future: db.asignatura(m.asignaturaId),
                               builder: (context, snapAsignatura) {
                                 final asignatura = snapAsignatura.data;
-                                if (asignatura == null)
+                                if (asignatura == null) {
                                   return const SizedBox.shrink();
+                                }
                                 final icono =
                                     iconoAsignaturaPorId(asignatura.iconoId);
                                 return Card(
@@ -111,10 +121,12 @@ class DashboardAlumnoScreen extends StatelessWidget {
                                         const SizedBox(height: 8),
                                         Row(
                                           children: [
-                                            if (asignatura.permiteGrabarEstudio) ...[
+                                            if (asignatura
+                                                .permiteGrabarEstudio) ...[
                                               Expanded(
                                                 child: FilledButton.icon(
-                                                  onPressed: () => Navigator.push(
+                                                  onPressed: () =>
+                                                      Navigator.push(
                                                     context,
                                                     MaterialPageRoute(
                                                       builder: (_) =>

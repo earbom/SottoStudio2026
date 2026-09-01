@@ -3,7 +3,6 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../models/asignatura.dart';
 import '../../models/asistencia.dart';
-import '../../models/curso.dart';
 import '../../models/sesion_estudio.dart';
 import '../../models/nota.dart';
 import '../../models/criterio_evaluacion.dart';
@@ -24,6 +23,11 @@ class AlumnoEnAsignaturaScreen extends StatefulWidget {
   // CLAUDE.md, discriminación por curso escolar). Normalmente el activo,
   // salvo que se llegue aquí desde una consulta de un curso anterior.
   final String cursoEscolar;
+  // Pestaña con la que se abre (0=Calendario, 1=Estadísticas,
+  // 2=Notas) — por defecto Calendario; la cuadrícula de notas de la
+  // asignatura abre directamente en Notas al ver el histórico de un
+  // alumno.
+  final int pestanaInicial;
 
   const AlumnoEnAsignaturaScreen({
     super.key,
@@ -31,6 +35,7 @@ class AlumnoEnAsignaturaScreen extends StatefulWidget {
     required this.asignatura,
     required this.perfil,
     required this.cursoEscolar,
+    this.pestanaInicial = 0,
   });
 
   @override
@@ -97,6 +102,7 @@ class _AlumnoEnAsignaturaScreenState extends State<AlumnoEnAsignaturaScreen> {
     }
     return DefaultTabController(
       length: 3,
+      initialIndex: widget.pestanaInicial,
       child: Scaffold(
         appBar: AppBar(
           title: Text(widget.alumno.nombre),
@@ -114,6 +120,12 @@ class _AlumnoEnAsignaturaScreenState extends State<AlumnoEnAsignaturaScreen> {
               cursoEscolar: widget.cursoEscolar,
               puedeGestionar: _puedeGestionar,
               marcadaPorUid: _authService.usuarioActual?.uid ?? '',
+              // El propio alumno viendo su calendario: colorear por
+              // horas de estudio en vez de por asistencia (ver
+              // CLAUDE.md) — se detecta comparando uid, no el permiso
+              // (un alumno siempre pasa su propio uid como alumno Y
+              // como perfil al verse a sí mismo).
+              esVistaPropia: widget.perfil.uid == widget.alumno.uid,
               db: _db,
             ),
             _TabEstadisticas(alumnoId: widget.alumno.uid, asignatura: widget.asignatura, db: _db),
@@ -137,6 +149,7 @@ class _TabCalendario extends StatefulWidget {
   final String cursoEscolar;
   final bool puedeGestionar;
   final String marcadaPorUid;
+  final bool esVistaPropia;
   final DbService db;
 
   const _TabCalendario({
@@ -145,6 +158,7 @@ class _TabCalendario extends StatefulWidget {
     required this.cursoEscolar,
     required this.puedeGestionar,
     required this.marcadaPorUid,
+    required this.esVistaPropia,
     required this.db,
   });
 
@@ -162,12 +176,84 @@ class _TabCalendarioState extends State<_TabCalendario> {
   // individuales y cada alumno puede tener un horario distinto).
   List<int> _diasSemana = [];
   bool _cargando = true;
+  // Todas las asistencias de este alumno en esta asignatura, indexadas
+  // por 'fecha' ('yyyy-MM-dd'), para pintar el calendario completo de
+  // un vistazo (verde/naranja/rojo) sin depender del día seleccionado.
+  // Solo se usa cuando NO es la vista propia del alumno (ver CLAUDE.md:
+  // la asistencia por colores no aporta nada al propio alumno, que ve
+  // en su lugar sus horas de estudio).
+  Map<String, Asistencia> _asistenciasPorFecha = {};
+  // ms efectivos por 'fecha' ('yyyy-MM-dd'), para la vista propia del
+  // alumno. Objetivo diario/semanal salen de
+  // Asignatura.horasObjetivoSemanal (diario = semanal/7), configurable
+  // por dirección desde CriteriosEvaluacionScreen (ver CLAUDE.md).
+  Map<String, int> _msEfectivoPorFecha = {};
+  double _objetivoDiarioHoras = 0;
+  double _objetivoSemanalHoras = 0;
+  // Fechas de inicio de semana (lunes, 'yyyy-MM-dd') donde el acumulado
+  // de esa semana ya alcanza el objetivo semanal — permite que el fin
+  // de semana "recupere" horas que faltaban entre semana.
+  Set<String> _semanasCompletas = {};
 
   @override
   void initState() {
     super.initState();
     _cargarMatricula();
     _cargarDia(_diaSeleccionado);
+    if (widget.esVistaPropia) {
+      _cargarHorasEstudio();
+    } else {
+      _cargarTodasLasAsistencias();
+    }
+  }
+
+  DateTime _inicioDeSemana(DateTime dia) {
+    final soloFecha = DateTime(dia.year, dia.month, dia.day);
+    return soloFecha.subtract(Duration(days: soloFecha.weekday - DateTime.monday));
+  }
+
+  Future<void> _cargarHorasEstudio() async {
+    final sesiones = await widget.db
+        .sesionesDeAlumnoEnAsignatura(alumnoId: widget.alumnoId, asignaturaId: widget.asignatura.id!)
+        .first;
+
+    final msPorFecha = <String, int>{};
+    for (final s in sesiones) {
+      final clave = Asistencia.formatearFecha(s.fechaInicio);
+      msPorFecha[clave] = (msPorFecha[clave] ?? 0) + s.duracionEfectivaMs;
+    }
+
+    final objetivoSemanal = widget.asignatura.horasObjetivoSemanal;
+    final objetivoDiario = objetivoSemanal / 7;
+
+    final msPorSemana = <String, int>{};
+    for (final entry in msPorFecha.entries) {
+      final inicioSemana = _inicioDeSemana(DateTime.parse(entry.key));
+      final clave = Asistencia.formatearFecha(inicioSemana);
+      msPorSemana[clave] = (msPorSemana[clave] ?? 0) + entry.value;
+    }
+    final semanasCompletas = <String>{
+      if (objetivoSemanal > 0)
+        for (final entry in msPorSemana.entries)
+          if (entry.value / 3600000 >= objetivoSemanal) entry.key,
+    };
+
+    if (!mounted) return;
+    setState(() {
+      _msEfectivoPorFecha = msPorFecha;
+      _objetivoDiarioHoras = objetivoDiario;
+      _objetivoSemanalHoras = objetivoSemanal;
+      _semanasCompletas = semanasCompletas;
+    });
+  }
+
+  Future<void> _cargarTodasLasAsistencias() async {
+    final lista = await widget.db.asistenciasDeAlumnoEnAsignatura(
+      alumnoId: widget.alumnoId,
+      asignaturaId: widget.asignatura.id!,
+    );
+    if (!mounted) return;
+    setState(() => _asistenciasPorFecha = {for (final a in lista) a.fecha: a});
   }
 
   Future<void> _cargarMatricula() async {
@@ -213,6 +299,7 @@ class _TabCalendarioState extends State<_TabCalendario> {
         marcadaPor: widget.marcadaPorUid,
       );
       await _cargarDia(_diaSeleccionado);
+      await _cargarTodasLasAsistencias();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -243,23 +330,21 @@ class _TabCalendarioState extends State<_TabCalendario> {
           },
           calendarBuilders: CalendarBuilders(
             defaultBuilder: (context, day, focusedDay) {
-              if (_diasSemana.contains(day.weekday)) {
-                return Center(
-                  child: Container(
-                    margin: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text('${day.day}'),
-                  ),
-                );
-              }
-              return null;
+              if (widget.esVistaPropia) return _construirDiaEstudio(context, day);
+              return _construirDiaAsistencia(context, day);
             },
           ),
         ),
+        if (widget.esVistaPropia && _objetivoDiarioHoras > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text(
+              'Objetivo: ${_objetivoSemanalHoras.toStringAsFixed(1)} h/semana '
+              '(${_objetivoDiarioHoras.toStringAsFixed(2)} h/día). El fin de semana cuenta para '
+              'recuperar horas de la semana — si la semana llega al objetivo, verás ⭐ en sus días.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
         const Divider(height: 1),
         if (_cargando)
           const Padding(
@@ -320,6 +405,89 @@ class _TabCalendarioState extends State<_TabCalendario> {
     );
   }
 
+  Widget? _construirDiaAsistencia(BuildContext context, DateTime day) {
+    final asistencia = _asistenciasPorFecha[Asistencia.formatearFecha(day)];
+    final esDiaClaseSemana = _diasSemana.contains(day.weekday);
+    if (asistencia == null && !esDiaClaseSemana) return null;
+
+    // Verde = asistió, naranja = asistió con retraso, rojo = faltó —
+    // mismos colores que los botones de marcar asistencia
+    // (_botonEstadoAsistencia) y que _FilaMatricula en
+    // asignatura_detalle_screen.dart, para que la vista de un mes
+    // entero se lea de un vistazo.
+    Color? colorAsistencia;
+    if (asistencia != null) {
+      colorAsistencia =
+          !asistencia.asistio ? Colors.red : (asistencia.retraso ? Colors.orange : Colors.green);
+    }
+
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: colorAsistencia?.withValues(alpha: 0.25) ??
+              Theme.of(context).colorScheme.primaryContainer,
+          shape: BoxShape.circle,
+          border: colorAsistencia != null ? Border.all(color: colorAsistencia, width: 2) : null,
+        ),
+        alignment: Alignment.center,
+        child: Text('${day.day}'),
+      ),
+    );
+  }
+
+  Widget? _construirDiaEstudio(BuildContext context, DateTime day) {
+    final claveFecha = Asistencia.formatearFecha(day);
+    final msEfectivo = _msEfectivoPorFecha[claveFecha] ?? 0;
+    final tieneObjetivo = _objetivoDiarioHoras > 0;
+
+    // Rojo = no estudió ese día, ámbar = estudió pero no llegó al
+    // objetivo diario, verde = lo alcanzó o superó. Sin objetivo
+    // definido para el curso, solo se marca en verde si hubo estudio
+    // (sin rojo/ámbar: no hay nada real contra lo que comparar).
+    Color? colorEstudio;
+    if (tieneObjetivo) {
+      colorEstudio = msEfectivo == 0
+          ? Colors.red
+          : ((msEfectivo / 3600000) < _objetivoDiarioHoras ? Colors.amber.shade700 : Colors.green);
+    } else if (msEfectivo > 0) {
+      colorEstudio = Colors.green;
+    }
+
+    final claveSemana = Asistencia.formatearFecha(_inicioDeSemana(day));
+    final semanaCompleta = _semanasCompletas.contains(claveSemana);
+
+    if (colorEstudio == null && !semanaCompleta) return null;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Center(
+          child: Container(
+            margin: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: colorEstudio?.withValues(alpha: 0.25) ??
+                  Theme.of(context).colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+              border: colorEstudio != null ? Border.all(color: colorEstudio, width: 2) : null,
+            ),
+            alignment: Alignment.center,
+            child: Text('${day.day}'),
+          ),
+        ),
+        // Semana completada (incluido el fin de semana recuperando
+        // horas): estrella en cada día de esa semana, no solo el
+        // domingo, para que se vea sea cual sea el día enfocado.
+        if (semanaCompleta)
+          const Positioned(
+            top: 0,
+            right: 4,
+            child: Icon(Icons.star, size: 14, color: Colors.amber),
+          ),
+      ],
+    );
+  }
+
   Widget _botonEstadoAsistencia({
     required IconData icon,
     required String label,
@@ -362,7 +530,6 @@ class _TabEstadisticas extends StatelessWidget {
       future: Future.wait([
         db.asistenciasDeAlumnoEnAsignatura(alumnoId: alumnoId, asignaturaId: asignatura.id!),
         db.sesionesDeAlumnoEnAsignatura(alumnoId: alumnoId, asignaturaId: asignatura.id!).first,
-        db.curso(asignatura.cursoId),
       ]),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -373,21 +540,21 @@ class _TabEstadisticas extends StatelessWidget {
         }
         final asistencias = snapshot.data![0] as List<Asistencia>;
         final sesiones = snapshot.data![1] as List<SesionEstudio>;
-        final curso = snapshot.data![2] as Curso?;
 
         final horasEfectivasTotales =
             sesiones.fold<int>(0, (acc, s) => acc + s.duracionEfectivaMs) / 3600000;
 
-        // Objetivo anual = objetivo mensual × 12 (no se modela un
-        // calendario lectivo con meses sin clase, ver CLAUDE.md).
-        // Horas del año en curso, no las totales históricas: así el
-        // indicador rojo/verde refleja el progreso del año actual.
+        // Objetivo anual = objetivo mensual de la ASIGNATURA × 12 (no
+        // se modela un calendario lectivo con meses sin clase, ver
+        // CLAUDE.md). Horas del año en curso, no las totales
+        // históricas: así el indicador rojo/verde refleja el progreso
+        // del año actual.
         final inicioAnio = DateTime(DateTime.now().year, 1, 1);
         final horasEfectivasAnio = sesiones
                 .where((s) => !s.fechaInicio.isBefore(inicioAnio))
                 .fold<int>(0, (acc, s) => acc + s.duracionEfectivaMs) /
             3600000;
-        final objetivoAnual = (curso?.horasObjetivoMensual ?? 0) * 12;
+        final objetivoAnual = asignatura.horasObjetivoMensual * 12;
         final tieneObjetivoAnual = objetivoAnual > 0;
         final diferenciaAnual = horasEfectivasAnio - objetivoAnual;
 
@@ -563,7 +730,11 @@ class _TabNotas extends StatelessWidget {
     required this.db,
   });
 
-  Future<void> _crearNota(BuildContext context, List<CriterioEvaluacion> criterios) async {
+  Future<void> _crearNota(
+    BuildContext context,
+    List<CriterioEvaluacion> criterios, {
+    CriterioEvaluacion? preseleccionado,
+  }) async {
     if (criterios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -575,7 +746,7 @@ class _TabNotas extends StatelessWidget {
 
     final valorCtrl = TextEditingController();
     final comentarioCtrl = TextEditingController();
-    CriterioEvaluacion criterioElegido = criterios.first;
+    CriterioEvaluacion criterioElegido = preseleccionado ?? criterios.first;
 
     final crear = await showDialog<bool>(
       context: context,
@@ -655,6 +826,22 @@ class _TabNotas extends StatelessWidget {
                 return acc + n.valor * criterio.peso / 100;
               });
 
+              // Agrupadas por criterio (no una lista plana de notas):
+              // así un criterio sin ninguna nota puesta todavía también
+              // aparece, marcado como "Pendiente" — antes solo era
+              // visible como opción del desplegable al pulsar "+", sin
+              // ninguna vista de qué pruebas existen en total (ver
+              // CLAUDE.md).
+              final notasPorCriterio = <String, List<Nota>>{};
+              for (final n in notas) {
+                (notasPorCriterio[n.criterioId] ??= []).add(n);
+              }
+              // Notas cuyo criterio ya no existe (borrado después de
+              // puntuar) — no deben desaparecer solo por no encajar en
+              // la agrupación por criterio actual.
+              final notasSinCriterio =
+                  notas.where((n) => !criteriosPorId.containsKey(n.criterioId)).toList();
+
               return Column(
                 children: [
                   if (notas.isNotEmpty)
@@ -666,26 +853,67 @@ class _TabNotas extends StatelessWidget {
                       ),
                     ),
                   Expanded(
-                    child: notas.isEmpty
-                        ? const Center(child: Text('Sin notas registradas todavía.'))
-                        : ListView.separated(
-                            itemCount: notas.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (context, i) {
-                              final nota = notas[i];
-                              final criterio = criteriosPorId[nota.criterioId];
-                              final nombreCriterio = criterio?.nombre ?? '(criterio eliminado)';
-                              final peso = criterio != null ? ' · ${criterio.peso.toStringAsFixed(0)}%' : '';
-                              return ListTile(
-                                title: Text('${nota.valor.toStringAsFixed(1)} — $nombreCriterio$peso'),
-                                subtitle: Text(
-                                  nota.comentario.isEmpty
-                                      ? 'Estado: ${nota.estado.name}'
-                                      : '${nota.comentario}\nEstado: ${nota.estado.name}',
+                    child: criterios.isEmpty && notasSinCriterio.isEmpty
+                        ? const Center(
+                            child: Text(
+                                'Dirección aún no ha definido criterios de evaluación para esta asignatura.'))
+                        : ListView(
+                            children: [
+                              for (final criterio in criterios) ...[
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                                  child: Text(
+                                    '${criterio.nombre} (${criterio.peso.toStringAsFixed(0)}%)',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
                                 ),
-                                isThreeLine: nota.comentario.isNotEmpty,
-                              );
-                            },
+                                if ((notasPorCriterio[criterio.id] ?? const []).isEmpty)
+                                  ListTile(
+                                    leading: const Icon(Icons.schedule_outlined),
+                                    title: const Text('Pendiente'),
+                                    trailing: perfil.esProfesor && puedeGestionar
+                                        ? IconButton(
+                                            icon: const Icon(Icons.add),
+                                            tooltip: 'Añadir nota para este criterio',
+                                            onPressed: () => _crearNota(context, criterios,
+                                                preseleccionado: criterio),
+                                          )
+                                        : null,
+                                  )
+                                else
+                                  for (final nota in notasPorCriterio[criterio.id]!)
+                                    ListTile(
+                                      title: Text(nota.valor.toStringAsFixed(1)),
+                                      subtitle: Text(
+                                        nota.comentario.isEmpty
+                                            ? 'Estado: ${nota.estado.name}'
+                                            : '${nota.comentario}\nEstado: ${nota.estado.name}',
+                                      ),
+                                      isThreeLine: nota.comentario.isNotEmpty,
+                                    ),
+                                const Divider(height: 1),
+                              ],
+                              if (notasSinCriterio.isNotEmpty) ...[
+                                const Padding(
+                                  padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                                  child: Text('(criterio eliminado)',
+                                      style: TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                                for (final nota in notasSinCriterio)
+                                  ListTile(
+                                    title: Text(nota.valor.toStringAsFixed(1)),
+                                    subtitle: Text(
+                                      nota.comentario.isEmpty
+                                          ? 'Estado: ${nota.estado.name}'
+                                          : '${nota.comentario}\nEstado: ${nota.estado.name}',
+                                    ),
+                                    isThreeLine: nota.comentario.isNotEmpty,
+                                  ),
+                              ],
+                            ],
                           ),
                   ),
                 ],

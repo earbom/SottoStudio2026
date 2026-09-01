@@ -1,162 +1,164 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import '../../models/asignatura.dart';
+import '../../models/criterio_evaluacion.dart';
 import '../../models/nota.dart';
 import '../../models/usuario.dart';
-import '../../models/asignatura.dart';
 import '../../services/db_service.dart';
 
-class NotasPendientesScreen extends StatefulWidget {
+/// Dirección ya no valida nota por nota (era demasiado trabajo:
+/// aprobar cada examen suelto de cada alumno) — solo valida la NOTA
+/// FINAL de un alumno en una asignatura, y solo cuando ese alumno ya
+/// tiene una nota puesta para TODOS los criterios de evaluación
+/// configurados (excluyendo las horas de estudio, que ni siquiera son
+/// un criterio). Mientras falte algún criterio, ese alumno·asignatura
+/// simplemente no aparece en esta lista.
+class NotasPendientesScreen extends StatelessWidget {
   const NotasPendientesScreen({super.key});
 
   @override
-  State<NotasPendientesScreen> createState() => _NotasPendientesScreenState();
-}
-
-class _NotasPendientesScreenState extends State<NotasPendientesScreen> {
-  final DbService _db = DbService();
-  final Set<String> _seleccionadas = {};
-  bool _modoSeleccion = false;
-
-  void _alternarSeleccion(String notaId) {
-    setState(() {
-      _seleccionadas.contains(notaId) ? _seleccionadas.remove(notaId) : _seleccionadas.add(notaId);
-    });
-  }
-
-  void _salirDeSeleccion() {
-    setState(() {
-      _modoSeleccion = false;
-      _seleccionadas.clear();
-    });
-  }
-
-  Future<void> _marcarSeleccionadas(EstadoNota estado) async {
-    await _db.actualizarEstadoNotas(_seleccionadas.toList(), estado);
-    _salirDeSeleccion();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final db = DbService();
     return Scaffold(
-      appBar: _modoSeleccion
-          ? AppBar(
-              leading: IconButton(icon: const Icon(Icons.close), onPressed: _salirDeSeleccion),
-              title: Text('${_seleccionadas.length} seleccionada(s)'),
-            )
-          : null,
       body: StreamBuilder<List<Nota>>(
-        stream: _db.notasPendientesSupervision(),
+        stream: db.notasPendientesSupervision(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final notas = snapshot.data!;
-          if (notas.isEmpty) {
+          final pendientes = snapshot.data!;
+          if (pendientes.isEmpty) {
             return const Center(child: Text('No hay notas pendientes de supervisión.'));
           }
-          return Column(
+
+          // Agrupadas por alumno+asignatura: cada grupo es una posible
+          // "nota final" a validar, no una nota suelta.
+          final grupos = <String, List<Nota>>{};
+          for (final n in pendientes) {
+            (grupos['${n.alumnoId}_${n.asignaturaId}'] ??= []).add(n);
+          }
+
+          return ListView(
             children: [
-              if (!_modoSeleccion)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.checklist),
-                      label: const Text('Seleccionar varias'),
-                      onPressed: () => setState(() => _modoSeleccion = true),
-                    ),
-                  ),
+              for (final grupo in grupos.values)
+                _FilaNotaFinal(
+                  alumnoId: grupo.first.alumnoId,
+                  asignaturaId: grupo.first.asignaturaId,
+                  notasPendientesIds: grupo.map((n) => n.id!).toList(),
+                  db: db,
                 ),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: notas.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, i) => _FilaNota(
-                    nota: notas[i],
-                    db: _db,
-                    modoSeleccion: _modoSeleccion,
-                    seleccionada: _seleccionadas.contains(notas[i].id),
-                    onToggleSeleccion: () => _alternarSeleccion(notas[i].id!),
-                  ),
-                ),
-              ),
             ],
           );
         },
       ),
-      bottomNavigationBar: _modoSeleccion && _seleccionadas.isNotEmpty
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => _marcarSeleccionadas(EstadoNota.supervisada),
-                        child: const Text('Marcar supervisadas'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => _marcarSeleccionadas(EstadoNota.corregida),
-                        child: const Text('Marcar corregidas'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : null,
     );
   }
 }
 
-class _FilaNota extends StatelessWidget {
-  final Nota nota;
+class _FilaNotaFinal extends StatelessWidget {
+  final String alumnoId;
+  final String asignaturaId;
+  final List<String> notasPendientesIds;
   final DbService db;
-  final bool modoSeleccion;
-  final bool seleccionada;
-  final VoidCallback onToggleSeleccion;
 
-  const _FilaNota({
-    required this.nota,
+  const _FilaNotaFinal({
+    required this.alumnoId,
+    required this.asignaturaId,
+    required this.notasPendientesIds,
     required this.db,
-    required this.modoSeleccion,
-    required this.seleccionada,
-    required this.onToggleSeleccion,
   });
+
+  Future<void> _marcar(BuildContext context, EstadoNota estado) async {
+    try {
+      await db.actualizarEstadoNotas(notasPendientesIds, estado);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Usuario?>(
-      future: db.obtenerUsuario(nota.alumnoId),
-      builder: (context, snapAlumno) {
-        final nombreAlumno = snapAlumno.data?.nombre ?? nota.alumnoId;
-        return FutureBuilder<Asignatura?>(
-          future: db.asignatura(nota.asignaturaId),
-          builder: (context, snapAsignatura) {
-            final nombreAsignatura = snapAsignatura.data?.nombre ?? nota.asignaturaId;
-            return ListTile(
-              leading: modoSeleccion
-                  ? Checkbox(value: seleccionada, onChanged: (_) => onToggleSeleccion())
-                  : null,
-              title: Text('$nombreAlumno · $nombreAsignatura'),
-              subtitle: Text(
-                '${nota.valor.toStringAsFixed(1)} — ${nota.comentario}\n${DateFormat('dd/MM/yyyy').format(nota.fecha)}',
-              ),
-              isThreeLine: true,
-              trailing: modoSeleccion
-                  ? null
-                  : PopupMenuButton<EstadoNota>(
-                      onSelected: (estado) => db.actualizarEstadoNota(nota.id!, estado),
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(value: EstadoNota.supervisada, child: Text('Marcar supervisada')),
-                        PopupMenuItem(value: EstadoNota.corregida, child: Text('Marcar corregida')),
-                      ],
-                    ),
-              onTap: modoSeleccion ? onToggleSeleccion : null,
+    return FutureBuilder<List<CriterioEvaluacion>>(
+      future: db.criteriosDeAsignatura(asignaturaId).first,
+      builder: (context, snapCriterios) {
+        if (!snapCriterios.hasData) return const SizedBox.shrink();
+        final criterios = snapCriterios.data!;
+        // Sin criterios configurados no hay "nota final" que validar.
+        if (criterios.isEmpty) return const SizedBox.shrink();
+
+        return FutureBuilder<List<Nota>>(
+          future: db.notasDeAlumno(alumnoId).first,
+          builder: (context, snapNotas) {
+            if (!snapNotas.hasData) return const SizedBox.shrink();
+            final notas = snapNotas.data!.where((n) => n.asignaturaId == asignaturaId).toList();
+
+            // Completo = hay al menos una nota (de cualquier estado)
+            // por cada criterio configurado.
+            final criterioIds = criterios.map((c) => c.id).toSet();
+            final cubiertos = notas.map((n) => n.criterioId).toSet();
+            if (!criterioIds.every(cubiertos.contains)) return const SizedBox.shrink();
+
+            // Nota ponderada con la MÁS RECIENTE de cada criterio.
+            final criteriosPorId = {for (final c in criterios) c.id!: c};
+            final masRecientePorCriterio = <String, Nota>{};
+            for (final n in notas) {
+              final actual = masRecientePorCriterio[n.criterioId];
+              if (actual == null || n.fecha.isAfter(actual.fecha)) {
+                masRecientePorCriterio[n.criterioId] = n;
+              }
+            }
+            final notaFinal = masRecientePorCriterio.values.fold<double>(0, (acc, n) {
+              final criterio = criteriosPorId[n.criterioId];
+              if (criterio == null) return acc;
+              return acc + n.valor * criterio.peso / 100;
+            });
+
+            return FutureBuilder<Usuario?>(
+              future: db.obtenerUsuario(alumnoId),
+              builder: (context, snapAlumno) {
+                final nombreAlumno = snapAlumno.data?.nombre ?? alumnoId;
+                return FutureBuilder<Asignatura?>(
+                  future: db.asignatura(asignaturaId),
+                  builder: (context, snapAsignatura) {
+                    final nombreAsignatura = snapAsignatura.data?.nombre ?? asignaturaId;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$nombreAlumno · $nombreAsignatura',
+                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text('Nota final: ${notaFinal.toStringAsFixed(2)}'),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () => _marcar(context, EstadoNota.supervisada),
+                                    child: const Text('Marcar supervisada'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: FilledButton(
+                                    onPressed: () => _marcar(context, EstadoNota.corregida),
+                                    child: const Text('Marcar corregida'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
             );
           },
         );

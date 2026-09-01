@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/db_service.dart';
 
@@ -6,7 +7,10 @@ import '../../services/db_service.dart';
 /// cada asignatura (ver CLAUDE.md). Avanzar de curso NO borra nada: el
 /// curso anterior queda en el historial, consultable (no editable)
 /// desde cada pantalla afectada (lista de la asignatura, ranking,
-/// informe de horas).
+/// informe de horas). Cada fila del historial que no sea la activa
+/// permite volver a marcarla como activa (sin perder nada, ver
+/// CLAUDE.md) o eliminarla del historial (solo la quita de la lista,
+/// nunca borra matrículas/notas/asistencias reales).
 class CursoEscolarScreen extends StatefulWidget {
   const CursoEscolarScreen({super.key});
 
@@ -17,12 +21,12 @@ class CursoEscolarScreen extends StatefulWidget {
 class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
   final DbService _db = DbService();
 
-  Future<void> _avanzarCurso(String cursoActual) async {
+  Future<void> _crearOActivarCurso(String cursoActual) async {
     final ctrl = TextEditingController();
     final nuevo = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Avanzar de curso escolar'),
+        title: const Text('Crear/activar un curso escolar nuevo'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,7 +44,8 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
             const SizedBox(height: 8),
             const Text(
               'El curso actual no se borra: queda en el historial, solo '
-              'consultable desde cada pantalla.',
+              'consultable desde cada pantalla. Para volver a un curso que '
+              'ya existe en el historial, usa "Marcar como activo" en su fila.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
@@ -49,7 +54,7 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
           FilledButton(
             onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-            child: const Text('Avanzar'),
+            child: const Text('Crear/activar'),
           ),
         ],
       ),
@@ -64,6 +69,63 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
       return;
     }
     await _db.avanzarCursoEscolar(nuevo);
+  }
+
+  Future<void> _marcarComoActivo(String cursoEscolar) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Marcar como activo'),
+        content: Text(
+          'Vas a volver a marcar "$cursoEscolar" como curso escolar activo. '
+          'Sus matrículas, notas y asistencias ya existentes siguen intactas '
+          'y podrás seguir trabajando en él con normalidad.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Marcar como activo')),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    await _db.avanzarCursoEscolar(cursoEscolar);
+  }
+
+  Future<void> _eliminarDelHistorial(String cursoEscolar) async {
+    final tieneDatos = await _db.tieneDatosCursoEscolar(cursoEscolar);
+    if (!mounted) return;
+
+    if (tieneDatos) {
+      final continuar = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Este curso escolar tiene datos'),
+          content: Text(
+            'El curso escolar "$cursoEscolar" tiene matrículas (y posiblemente '
+            'notas o asistencias) de alumnos. Esta acción NO borra esos datos '
+            '— seguirán existiendo en la base de datos — pero el año dejará '
+            'de aparecer como opción de curso escolar en la app.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
+          ],
+        ),
+      );
+      if (continuar != true) return;
+      if (!mounted) return;
+    }
+
+    final confirmado = await _confirmarConCuentaAtras(cursoEscolar);
+    if (confirmado != true) return;
+    await _db.eliminarCursoEscolarDelHistorial(cursoEscolar);
+  }
+
+  Future<bool?> _confirmarConCuentaAtras(String cursoEscolar) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => _DialogoConfirmarConCuentaAtras(cursoEscolar: cursoEscolar),
+    );
   }
 
   @override
@@ -95,9 +157,9 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
                           Text(activo, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 12),
                           FilledButton.icon(
-                            onPressed: () => _avanzarCurso(activo),
+                            onPressed: () => _crearOActivarCurso(activo),
                             icon: const Icon(Icons.arrow_forward),
-                            label: const Text('Avanzar de curso escolar'),
+                            label: const Text('Crear/activar un curso escolar nuevo'),
                           ),
                         ],
                       ),
@@ -110,6 +172,23 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
                         leading: Icon(curso == activo ? Icons.star : Icons.history),
                         title: Text(curso),
                         subtitle: curso == activo ? const Text('Activo') : null,
+                        trailing: curso == activo
+                            ? null
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.check_circle_outline),
+                                    tooltip: 'Marcar como activo',
+                                    onPressed: () => _marcarComoActivo(curso),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline),
+                                    tooltip: 'Eliminar del historial',
+                                    onPressed: () => _eliminarDelHistorial(curso),
+                                  ),
+                                ],
+                              ),
                       )),
                 ],
               );
@@ -117,6 +196,59 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _DialogoConfirmarConCuentaAtras extends StatefulWidget {
+  final String cursoEscolar;
+  const _DialogoConfirmarConCuentaAtras({required this.cursoEscolar});
+
+  @override
+  State<_DialogoConfirmarConCuentaAtras> createState() => _DialogoConfirmarConCuentaAtrasState();
+}
+
+class _DialogoConfirmarConCuentaAtrasState extends State<_DialogoConfirmarConCuentaAtras> {
+  static const _segundosIniciales = 5;
+  int _segundosRestantes = _segundosIniciales;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_segundosRestantes <= 1) {
+        timer.cancel();
+        setState(() => _segundosRestantes = 0);
+      } else {
+        setState(() => _segundosRestantes--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final habilitado = _segundosRestantes == 0;
+    return AlertDialog(
+      title: Text('Eliminar ${widget.cursoEscolar} del historial'),
+      content: const Text(
+        'Vas a eliminar este curso escolar del historial. Dejará de aparecer '
+        'como opción en toda la app (aunque no se borre ningún dato). Espera '
+        'unos segundos para confirmar.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: habilitado ? () => Navigator.pop(context, true) : null,
+          child: Text(habilitado ? 'Eliminar' : 'Eliminar ($_segundosRestantes)'),
+        ),
+      ],
     );
   }
 }
