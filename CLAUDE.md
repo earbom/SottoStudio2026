@@ -1510,13 +1510,200 @@ dirección — un almacén local en el centro no sirve.
       más simple sin `Drawer` real no lo detectaba, porque el bug
       depende específicamente de ese desmontaje.
 
+61. **Quitar "Alumnos" para profesor + cuadrícula de iconos al elegir
+    curso (profesor).** Pedido en una reunión con dirección
+    (septiembre 2026, lote de 14 puntos — ver puntos 61-69): dirección
+    pidió retirar la entrada "Alumnos" del menú de profesor —
+    superflua ahora que existe la vista global (punto 63) para marcar
+    asistencia sin entrar asignatura por asignatura. `AlumnosScreen`
+    (`lib/screens/comunes/alumnos_screen.dart`) vuelve a ser
+    dirección-only, como antes del punto 47; se eliminó por completo
+    `AlumnoAsistenciaHoyScreen` y los métodos de `DbService`
+    (`alumnosDeProfesorAgrupados`, `matriculasDeAlumnoImpartidasPorProfesor`)
+    que solo ella usaba, sin dejar código muerto. De paso, dirección
+    pidió también que profesor viera la misma cuadrícula de iconos que
+    dirección al elegir curso dentro de una asignatura (antes lista de
+    texto): `AsignaturaNombreCursosScreen` decide grid vs lista según
+    `perfil.esProfesor && !perfil.esDireccion`.
+
+62. **Cuadro de Honor a mes vencido, solo quien llegó al objetivo.**
+    Pedido en la misma reunión: dejó de ser en tiempo real sobre el mes
+    en curso —una clasificación que cambia bajo los pies mientras el
+    mes sigue abierto no tenía sentido como reconocimiento— y pasa a
+    mostrar el MES ANTERIOR ya cerrado. `DbService.horasPorAsignaturaMensual()`
+    filtra ahora `fechaInicio` entre el 1 del mes anterior y el 1 del
+    mes actual (antes solo tenía cota inferior = mes en curso).
+    `CuadroDeHonorScreen` solo muestra asignaturas con
+    `horasObjetivoMensual > 0` y, dentro de ellas, solo alumnos con
+    `horasEfectivasMes >= objetivo` — dejó de ser un ranking
+    rojo/verde de todos, es un reconocimiento de quien llegó (icono de
+    trofeo en vez de posición numerada).
+
+63. **Vista global de profesor + navegación reordenada
+    Asignatura → Curso → Menú.** Dos cambios entrelazados, el segundo
+    corrigiendo un problema de UX real del primero, reportado al
+    probar la app.
+    - `SeccionesAsignaturaScreen` gana una 4ª opción, "Vista global"
+      (`VistaGlobalAsignaturaScreen`, nueva,
+      `lib/screens/comunes/vista_global_asignatura_screen.dart`): apila
+      Asistencia de hoy, Notas y Horas de estudio en una sola ventana
+      con scroll, más una sección "Progreso del objetivo este mes"
+      arriba del todo (solo si `horasObjetivoMensual > 0`) que colorea
+      en verde "Objetivo cumplido" o en rojo "Faltan X.X h" por
+      alumno, de un vistazo. Para no duplicar lógica,
+      `AsistenciasAsignaturaScreen`/`NotasAsignaturaGridScreen`/`HorasAsignaturaScreen`
+      separaron su cuerpo (sin `Scaffold`/`AppBar` propios) en un
+      widget `Cuerpo*Asignatura` reutilizable, usado tanto por la
+      pantalla individual como por la vista global.
+    - **Reordenado el flujo de profesor**: antes era
+      Asignatura → Menú (Asistencias/Notas/Horas/Vista global) → Curso,
+      lo que con una asignatura de un solo curso se sentía como "me
+      vuelve a preguntar qué asignatura" al elegir curso después del
+      menú. Ahora es Asignatura → Curso → Menú, para cualquier número
+      de cursos. `AsignaturaNombreCursosScreen` perdió el parámetro
+      `seccion` que antes arrastraba — ahora decide sola, por rol
+      (`esProfesor() && !esDireccion()`), si tras elegir curso toca
+      `SeccionesAsignaturaScreen` (profesor) o `AsignaturaDetalleScreen`
+      (dirección, sin cambios). `SeccionesAsignaturaScreen` pasó de
+      recibir una lista de asignaturas + nombre de grupo a recibir una
+      única `Asignatura` + `cursoEscolar` ya resueltos.
+
+64. **Medallas y roscos semanales (alumno).** Sistema de horas
+    pendientes SEMANALES por asignatura, distinto del mensual/anual ya
+    existente (punto 17): un "rosco" (anillo de progreso,
+    `_RoscoPainter`, un `CustomPainter` de un arco simple) se rellena
+    con las horas efectivas de la SEMANA EN CURSO (lunes a domingo)
+    hasta `Asignatura.horasObjetivoSemanal` (ya existía, punto 52); al
+    completarse se sustituye por una medalla
+    (`Icons.emoji_events`). Nueva pantalla
+    `MedallasRoscosScreen` (`lib/screens/alumno/`), en el menú del
+    alumno junto a "Mi estudio" — solo lista asignaturas matriculadas
+    CON objetivo semanal configurado. Reutiliza
+    `DbService.historialAlumno()` (ya existente, "provably compliant"
+    para que un alumno lea sus propias sesiones) y agrega la semana en
+    cliente dentro de la propia pantalla — sin método nuevo en
+    `DbService` para esta parte.
+
+65. **Retraso configurable en la visibilidad de una nota para el
+    alumno.** `Asignatura.diasRetrasoVisibilidadNotas` (int, 0 =
+    visible al momento): configurable con un icono nuevo (⏱, tooltip
+    "Retraso de visibilidad para el alumno") en el `AppBar` de
+    `NotasAsignaturaGridScreen`, disponible para profesor Y dirección
+    (a diferencia de Criterios de evaluación, que sigue siendo
+    dirección-only) — guarda con
+    `DbService.actualizarAsignatura(id, {'diasRetrasoVisibilidadNotas': dias})`,
+    sin método dedicado nuevo. El filtro es SOLO client-side, no es un
+    límite de seguridad (la nota ya era legible por quien la pone; el
+    retraso es puramente de presentación para el alumno) — sin cambios
+    en `firestore.rules`. `_TabNotas`
+    (`alumno_en_asignatura_screen.dart`) filtra las notas ANTES de
+    calcular la ponderada y la agrupación por criterio, y solo cuando
+    `!puedeGestionar` (profesor/dirección ven la nota al momento
+    siempre, incluso mirando el detalle de un alumno); `MisNotasScreen`
+    filtra sin condición de rol, porque esa pantalla es siempre el
+    propio alumno mirando sus notas.
+
+66. **Plus de horas por orquesta.** Nuevo modelo `PlusOrquesta`
+    (`lib/models/plus_orquesta.dart`: `nombre` + `asignaturaDestinoId`
+    + `horasSemana`), colección `plusesOrquesta`, catálogo gestionado
+    por dirección en `PlusesOrquestaScreen`
+    (`lib/screens/direccion/`, menú "Gestión del centro"). Se elige un
+    plus (o ninguno) al matricular o editar una matrícula —
+    `Matricula.plusOrquestaId`, dropdown en `_configurarMatricula`
+    (`asignatura_detalle_screen.dart`) junto al profesor de
+    referencia. El plus NO crea `sesionesEstudio` sintéticas — se suma
+    como extra en tiempo de agregación vía
+    `DbService.plusesOrquestaAplicablesDeAlumno()` (nuevo, devuelve
+    también la `fechaAlta` de la matrícula que lo aplica, para no
+    proyectarlo hacia meses anteriores a que existiera), en 3 sitios:
+    rosco semanal (`MedallasRoscosScreen`, exacto — `horasSemana`
+    directo), cuadrícula mensual (`CuerpoHorasAsignatura`) y progreso
+    de mes en curso de Vista Global (`_ProgresoObjetivoAsignatura`) —
+    estos dos últimos con la aproximación `horasSemana × 4`/mes, mismo
+    criterio que el objetivo anual = mensual × 12 del punto 17.
+    **Alcance NO cubierto todavía** (deliberado): Informe de dirección
+    y Cuadro de Honor no reflejan el plus. `firestore.rules`: nueva
+    colección `plusesOrquesta` (lectura abierta, escritura solo
+    dirección, valida `horasSemana >= 0`) — `matriculas` no necesitó
+    cambios de reglas (la escritura ya no tenía allowlist de campos).
+
+67. **Horario real (hora inicio/fin), horario general de dirección y
+    horario visible de alumno/profesor.** El más grande del lote de la
+    reunión — MVP deliberadamente simplificado, confirmado con el
+    usuario antes de construir: NO es un editor de arrastrar y soltar
+    ni modela huecos libres/choques, es una VISUALIZACIÓN sobre datos
+    de matrícula que reutiliza el flujo de matricular ya existente
+    para añadir/editar/quitar, en vez de duplicar un editor aparte.
+    - `Matricula.horaInicio`/`horaFin` (`'HH:mm'`, `''` = sin
+      definir): la MISMA franja se aplica a todos los días de
+      `diasSemana` de esa matrícula (una clase de instrumento dura lo
+      mismo cada semana; para grupales, todo el grupo comparte
+      franja). Campos aditivos, no rompen nada de lo que ya dependía
+      de `diasSemana`. `_configurarMatricula` gana dos botones con
+      `showTimePicker` para elegirlas; `DbService.actualizarHorarioMatricula`
+      (nuevo) las guarda al editar, `DbService.matricular` al crear.
+    - `HorarioGeneralScreen` (dirección, nueva,
+      `lib/screens/direccion/horario_general_screen.dart`): tabla hora
+      × día construida sobre `todasLasMatriculasActivas` (ya existía,
+      dirección-only por diseño de reglas — ver punto 42), con filtros
+      de capa (instrumento/teoría, vía `permiteGrabarEstudio`) y por
+      profesor, y vistas de semana completa o un día concreto
+      (`SegmentedButton`) — NO hay vista de "x días" configurable.
+      Tocar una clase abre una ficha con botón "Editar matrícula" que
+      lleva a `AsignaturaDetalleScreen` de siempre.
+    - `HorarioScreen` (alumno/profesor, nueva,
+      `lib/screens/comunes/horario_screen.dart`, `HorarioModo.alumno` /
+      `.profesor`): agenda agrupada por día (no tabla — para una sola
+      persona se lee mejor que una rejilla). El modo profesor usa
+      `DbService.matriculasDeProfesor` (nuevo): itera las asignaturas
+      del profesor cross-curso y consulta `matriculasDeAsignatura` por
+      cada una — mismo patrón "provably compliant" ya establecido
+      (punto 25/47), no filtra `matriculas` directo por `profesorId`.
+    - **Propagación automática** (pedida explícitamente): sale gratis
+      de que las 3 pantallas lean la misma `Matricula` vía
+      stream/fetch bajo demanda — un cambio de horario desde dirección
+      se ve al momento en todas partes, sin lógica de sincronización
+      aparte.
+    - Sin cambios de `firestore.rules` (la escritura de `matriculas`
+      ya no tenía allowlist de campos).
+
+68. **Marcar asistencia o retraso en instrumento suma horas de
+    estudio automáticamente.** Pedido en la reunión, bloqueado hasta
+    tener horario real (punto 67) para saber CUÁNTO dura la clase.
+    `DbService.marcarAsistencia()` llama a
+    `_sincronizarSesionDeAsistencia()` (nuevo) tras guardar la
+    asistencia: si `asistio == true` (incluye retraso — llegar tarde
+    sigue siendo clase) en una asignatura con `permiteGrabarEstudio ==
+    true` y la matrícula tiene `horaInicio`/`horaFin` configurados,
+    crea/actualiza una `SesionEstudio` sintética
+    (`tipo: instrumento`) con duración `horaFin - horaInicio`, ID
+    determinista `asistencia_{alumnoId}_{asignaturaId}_{fecha}`
+    (mismo patrón que `asistencias`/`marcajes` — volver a marcar el
+    mismo día no duplica horas). Se BORRA sola si se marca "faltó", si
+    la asignatura no es de instrumento, o si la matrícula no tiene
+    horario configurado todavía — `delete()` sobre un doc que no
+    existe no falla, así que no hace falta comprobar antes. Al vivir
+    en la MISMA colección `sesionesEstudio` que las sesiones reales
+    grabadas con micrófono, se suma sola en TODOS los sitios que ya
+    agregan horas (rosco semanal, cuadrícula mensual, progreso de
+    vista global, Cuadro de Honor) sin tocar esas pantallas. Campos
+    denormalizados `origenAsistencia`/`fechaDia` (no son parte del
+    modelo Dart `SesionEstudio`, ver nomenclatura de colecciones).
+    `firestore.rules`: nueva función `esGeneradaPorAsistencia(data)` +
+    rama nueva en `create`/`update`/`delete` de `sesionesEstudio` para
+    quien puede marcar asistencia (dirección, profesor de la
+    asignatura, o sustituto ese día) — misma lista de actores que la
+    propia regla de `asistencias`. Tests de regresión en
+    `firestore-tests/rules.test.js`, describe `'sesionesEstudio:
+    sesión sintética generada al marcar asistencia'`.
+
 ## Nomenclatura de colecciones (fija, no renombrar sin avisar)
 
 `usuarios`, `sesionesEstudio`, `modulos`, `ejercicios`,
 `ejerciciosCompletados`, `notas`, `estadisticasAlumno`, `cursos`,
 `asignaturas`, `matriculas`, `asistencias`, `criteriosEvaluacion`,
 `sustituciones`, `horariosLaborales`, `marcajes`, `configuracion`,
-`gruposAsignatura`, `incidencias`.
+`gruposAsignatura`, `incidencias`, `plusesOrquesta`.
 
 - `usuarios.email` (nullable) y `usuarios.tieneCuenta` (bool, default
   `true`) — un alumno sin cuenta de Firebase Auth (creado con
@@ -1584,6 +1771,22 @@ dirección — un almacén local en el centro no sirve.
   (derivados de su propia `fecha`, no son campos del modelo Dart) — ver
   punto 26. `configuracion/centro`: documento único con
   `cursoEscolarActivo` + `historialCursosEscolares` — ver mismo punto.
+- `asignaturas.diasRetrasoVisibilidadNotas` (int, 0 = visible al
+  momento) — ver punto 65.
+- `matriculas.horaInicio`/`horaFin` (`'HH:mm'`, `''` = sin definir,
+  misma franja para todos los días de `diasSemana`) y
+  `matriculas.plusOrquestaId` (`''` = ninguno, referencia a
+  `plusesOrquesta/{id}`) — ver puntos 66 y 67.
+- `plusesOrquesta`: `{ nombre, asignaturaDestinoId, horasSemana,
+  createdAt, createdBy }`, dirección-only, catálogo elegido al
+  matricular — ver punto 66.
+- `sesionesEstudio.origenAsistencia` (bool, solo presente en sesiones
+  sintéticas generadas al marcar asistencia) y
+  `sesionesEstudio.fechaDia` (`'yyyy-MM-dd'`, derivado de
+  `fechaInicio`, mismo patrón que `Nota.fechaDia`) — ninguno de los
+  dos es campo del modelo Dart `SesionEstudio`, solo para que
+  `firestore.rules` identifique y gestione estas sesiones — ver punto
+  68.
 
 Evitar el nombre "Historial de Sesiones" para nada relacionado con
 estudio: en la documentación original ese nombre se usaba para
@@ -1680,8 +1883,10 @@ sesiones de login, no de práctica musical, y crea confusión si reaparece.
   todas las plataformas (ver punto 44); navegación principal invertida
   a asignatura-primero-curso-dentro para dirección y profesor (ver
   punto 46, `AsignaturasPorNombreScreen`); marcar asistencia desde
-  "Alumnos" para profesor, scope seguro por asignatura (ver punto 47,
-  `AlumnoAsistenciaHoyScreen`); cuadrícula de notas por asignatura (ver
+  "Alumnos" para profesor, scope seguro por asignatura (ver punto 47 —
+  **retirado en el punto 61**, `AlumnoAsistenciaHoyScreen` ya no
+  existe, sustituida por la Vista global del punto 63); cuadrícula de
+  notas por asignatura (ver
   punto 48, `NotasAsignaturaGridScreen`); colores de asistencia en el
   calendario del alumno (ver punto 49); bug de nombres en blanco del
   Cuadro de Honor arreglado (ver punto 50); alumnos en orden alfabético
@@ -1705,7 +1910,19 @@ sesiones de login, no de práctica musical, y crea confusión si reaparece.
   por letra inicial, roster de asignatura agrupado por profesor, notas
   pendientes reducidas a validar solo la nota final por criterios
   completos, y Cuadro de Honor con un único criterio (curso →
-  asignatura) — ver punto 59.
+  asignatura) — ver punto 59; retirada de "Alumnos" para profesor y
+  cuadrícula de iconos al elegir curso (ver punto 61); Cuadro de Honor
+  a mes vencido, solo quien llegó al objetivo (ver punto 62); vista
+  global de profesor (Asistencia+Notas+Horas+progreso del objetivo en
+  una ventana) y navegación reordenada Asignatura→Curso→Menú (ver
+  punto 63, `VistaGlobalAsignaturaScreen`); medallas y roscos
+  semanales del alumno (ver punto 64, `MedallasRoscosScreen`); retraso
+  configurable de visibilidad de notas (ver punto 65); plus de horas
+  por orquesta (ver punto 66, `PlusesOrquestaScreen`); horario real
+  (hora inicio/fin), horario general de dirección y horario visible de
+  alumno/profesor con propagación automática (ver punto 67,
+  `HorarioGeneralScreen` + `HorarioScreen`); asistencia en instrumento
+  sumando horas de estudio automáticamente (ver punto 68).
 - Pantallas pendientes: registro público de alumno (hoy solo dirección
   da de alta, ver punto 6), ejercicios.
 - Creación de cuentas de **dirección** sigue siendo manual por consola

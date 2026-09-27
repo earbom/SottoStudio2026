@@ -59,3 +59,10 @@ firebase-debug.*.log
 # Tests de firestore.rules
 firestore-tests/node_modules/
 firestore-tests/firestore-debug.log
+
+# Skills de Claude Code instaladas localmente (npx skills add) — solo
+# tooling del editor, sin relación con la app; reinstalables si hacen
+# falta, no aportan nada a quien abra este repo por el código.
+.agents/
+.claude/
+skills-lock.json
