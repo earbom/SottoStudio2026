@@ -236,6 +236,18 @@ abstract class AppLocalizations {
   /// **'Importar datos desde Excel'**
   String get menuImportarDatos;
 
+  /// No description provided for @menuPlusesOrquesta.
+  ///
+  /// In es, this message translates to:
+  /// **'Pluses de orquesta'**
+  String get menuPlusesOrquesta;
+
+  /// No description provided for @menuHorarioGeneral.
+  ///
+  /// In es, this message translates to:
+  /// **'Horario general'**
+  String get menuHorarioGeneral;
+
   /// No description provided for @menuDocencia.
   ///
   /// In es, this message translates to:
@@ -253,6 +265,18 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Mi estudio'**
   String get menuMiEstudio;
+
+  /// No description provided for @menuMedallasRoscos.
+  ///
+  /// In es, this message translates to:
+  /// **'Medallas y roscos'**
+  String get menuMedallasRoscos;
+
+  /// No description provided for @menuMiHorario.
+  ///
+  /// In es, this message translates to:
+  /// **'Mi horario'**
+  String get menuMiHorario;
 
   /// No description provided for @menuMiJornadaLaboral.
   ///

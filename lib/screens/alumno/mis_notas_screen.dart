@@ -39,13 +39,24 @@ class MisNotasScreen extends StatelessWidget {
                 future: db.asignatura(entry.key),
                 builder: (context, snapAsignatura) {
                   final nombreAsignatura = snapAsignatura.data?.nombre ?? '…';
+                  final diasRetraso = snapAsignatura.data?.diasRetrasoVisibilidadNotas ?? 0;
                   return FutureBuilder<List<CriterioEvaluacion>>(
                     future: db.criteriosDeAsignatura(entry.key).first,
                     builder: (context, snapCriterios) {
                       final criterios = {
                         for (final c in snapCriterios.data ?? <CriterioEvaluacion>[]) c.id!: c
                       };
-                      final notasAsignatura = entry.value;
+                      // Retraso de visibilidad (ver CLAUDE.md): esta
+                      // pantalla es siempre el propio alumno mirando sus
+                      // notas, así que se filtra sin condición de rol —
+                      // a diferencia de _TabNotas, que también la usan
+                      // profesor/dirección viendo a OTRO alumno.
+                      final notasAsignatura = entry.value
+                          .where((n) => !n.fecha
+                              .add(Duration(days: diasRetraso))
+                              .isAfter(DateTime.now()))
+                          .toList();
+                      if (notasAsignatura.isEmpty) return const SizedBox.shrink();
                       final notaPonderada = notasAsignatura.fold<double>(0, (acc, n) {
                         final criterio = criterios[n.criterioId];
                         if (criterio == null) return acc;

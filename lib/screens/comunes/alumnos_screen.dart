@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
-import '../../models/curso.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 import '../direccion/alumno_perfil_screen.dart';
 import '../direccion/crear_alumno_screen.dart';
-import 'alumno_asistencia_hoy_screen.dart';
 
-/// Listado de alumnos, alfabético por apellidos, SIN agrupar por
-/// curso (un alumno puede tener asignaturas de cursos distintos, así
-/// que la agrupación por curso dejó de tener sentido — reportado en
-/// el piloto). Para dirección es el listado completo del centro, con
-/// acceso a la ficha del alumno (boletín de notas) y de alta de
-/// nuevos alumnos. Para profesor es solo SUS alumnos (los que tiene
-/// asignados, ver `DbService.alumnosDeProfesorAgrupados`), y tocar uno
-/// lleva directamente a marcar la asistencia de hoy — pensado para no
-/// tener que entrar en cada asignatura por separado.
+/// Listado de alumnos del centro, alfabético por apellidos, SIN agrupar
+/// por curso (un alumno puede tener asignaturas de cursos distintos, así
+/// que la agrupación por curso dejó de tener sentido — reportado en el
+/// piloto). Dirección-only: da acceso a la ficha del alumno (boletín de
+/// notas) y de alta de nuevos alumnos.
+///
+/// Antes también era accesible para profesor (marcar asistencia de sus
+/// alumnos de un vistazo, ver historial), pero dirección pidió
+/// retirarla de ese lado: el profesor ya tiene la misma acción desde
+/// "Asistencias" dentro de cada asignatura.
 class AlumnosScreen extends StatelessWidget {
   final Usuario perfil;
 
@@ -24,68 +23,33 @@ class AlumnosScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final db = DbService();
     return Scaffold(
-      body: StreamBuilder<String>(
-        stream: db.cursoEscolarActivo(),
-        builder: (context, snapActivo) {
-          if (!snapActivo.hasData) {
+      body: StreamBuilder<List<Usuario>>(
+        stream: db.alumnosDelCentro(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final cursoEscolar = snapActivo.data!;
-
-          if (!perfil.esDireccion) {
-            return FutureBuilder<({List<Usuario> alumnos, Map<String, List<Curso>> cursosPorAlumno})>(
-              future: db.alumnosDeProfesorAgrupados(profesorId: perfil.uid, cursoEscolar: cursoEscolar),
-              builder: (context, snap) {
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snap.data!.alumnos.isEmpty) {
-                  return const Center(child: Text('Todavía no tienes alumnos asignados.'));
-                }
-                return _ListaAlfabetica(
-                  alumnos: snap.data!.alumnos,
-                  onTap: (alumno) => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AlumnoAsistenciaHoyScreen(alumno: alumno, perfil: perfil),
-                    ),
-                  ),
-                );
-              },
-            );
+          final alumnos = snapshot.data!;
+          if (alumnos.isEmpty) {
+            return const Center(child: Text('Aún no hay alumnos dados de alta.'));
           }
-
-          return StreamBuilder<List<Usuario>>(
-            stream: db.alumnosDelCentro(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final alumnos = snapshot.data!;
-              if (alumnos.isEmpty) {
-                return const Center(child: Text('Aún no hay alumnos dados de alta.'));
-              }
-              return _ListaAlfabetica(
-                alumnos: alumnos,
-                onTap: (alumno) => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => AlumnoPerfilScreen(alumno: alumno)),
-                ),
-              );
-            },
+          return _ListaAlfabetica(
+            alumnos: alumnos,
+            onTap: (alumno) => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => AlumnoPerfilScreen(alumno: alumno)),
+            ),
           );
         },
       ),
-      floatingActionButton: perfil.esDireccion
-          ? FloatingActionButton.extended(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CrearAlumnoScreen()),
-              ),
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('Nuevo alumno'),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CrearAlumnoScreen()),
+        ),
+        icon: const Icon(Icons.person_add_alt_1),
+        label: const Text('Nuevo alumno'),
+      ),
     );
   }
 }

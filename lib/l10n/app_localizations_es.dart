@@ -80,6 +80,12 @@ class AppLocalizationsEs extends AppLocalizations {
   String get menuImportarDatos => 'Importar datos desde Excel';
 
   @override
+  String get menuPlusesOrquesta => 'Pluses de orquesta';
+
+  @override
+  String get menuHorarioGeneral => 'Horario general';
+
+  @override
   String get menuDocencia => 'Docencia';
 
   @override
@@ -87,6 +93,12 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get menuMiEstudio => 'Mi estudio';
+
+  @override
+  String get menuMedallasRoscos => 'Medallas y roscos';
+
+  @override
+  String get menuMiHorario => 'Mi horario';
 
   @override
   String get menuMiJornadaLaboral => 'Mi jornada laboral';

@@ -438,6 +438,70 @@ describe('criteriosEvaluacion', () => {
   });
 });
 
+describe('plusesOrquesta', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('dir1').set({ permisos: ['direccion'] });
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('alumno1').set({ permisos: ['alumno'] });
+    });
+  });
+
+  it('dirección puede crear un plus con horasSemana válidas', async () => {
+    const direccion = testEnv.authenticatedContext('dir1').firestore();
+    await assertSucceeds(
+      direccion.collection('plusesOrquesta').add({
+        nombre: 'Orquesta de guitarras',
+        asignaturaDestinoId: 'guitarra',
+        horasSemana: 0.5,
+        createdAt: new Date().toISOString(),
+        createdBy: 'dir1',
+      })
+    );
+  });
+
+  it('rechaza horasSemana negativas', async () => {
+    const direccion = testEnv.authenticatedContext('dir1').firestore();
+    await assertFails(
+      direccion.collection('plusesOrquesta').add({
+        nombre: 'Orquesta de guitarras',
+        asignaturaDestinoId: 'guitarra',
+        horasSemana: -1,
+        createdAt: new Date().toISOString(),
+        createdBy: 'dir1',
+      })
+    );
+  });
+
+  it('un profesor NO puede crear un plus de orquesta', async () => {
+    const profesor = testEnv.authenticatedContext('profesorA').firestore();
+    await assertFails(
+      profesor.collection('plusesOrquesta').add({
+        nombre: 'Orquesta de guitarras',
+        asignaturaDestinoId: 'guitarra',
+        horasSemana: 0.5,
+        createdAt: new Date().toISOString(),
+        createdBy: 'profesorA',
+      })
+    );
+  });
+
+  it('cualquier usuario autenticado puede leer el catálogo', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('plusesOrquesta').doc('plus1').set({
+        nombre: 'Orquesta de guitarras',
+        asignaturaDestinoId: 'guitarra',
+        horasSemana: 0.5,
+        createdAt: new Date().toISOString(),
+        createdBy: 'dir1',
+      });
+    });
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    const doc = await assertSucceeds(alumno.collection('plusesOrquesta').doc('plus1').get());
+    assert.equal(doc.exists, true);
+  });
+});
+
 describe('cursos y asignaturas: control total de dirección', () => {
   beforeEach(async () => {
     await conDatosDePrueba(async (db) => {
@@ -1250,5 +1314,97 @@ describe('incidencias (modo desarrollador)', () => {
     await assertFails(alumno1.collection('incidencias').doc(id).delete());
     const dev = testEnv.authenticatedContext('dev1').firestore();
     await assertSucceeds(dev.collection('incidencias').doc(id).delete());
+  });
+});
+
+describe('sesionesEstudio: sesión sintética generada al marcar asistencia', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('alumno1').set({ permisos: ['alumno'] });
+      await db.collection('usuarios').doc('dir1').set({ permisos: ['direccion'] });
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorB').set({ permisos: ['profesor'] });
+      await db.collection('asignaturas').doc('guitarra').set({
+        cursoId: 'curso1',
+        nombre: 'Guitarra',
+        nombreNormalizado: 'guitarra',
+        profesorIds: ['profesorA'],
+        permiteGrabarEstudio: true,
+      });
+      await db.collection('gruposAsignatura').doc('guitarra').set({ profesorIds: ['profesorA'] });
+    });
+  });
+
+  const sesion = {
+    alumnoId: 'alumno1',
+    tipo: 'instrumento',
+    asignaturaId: 'guitarra',
+    fechaInicio: new Date('2026-01-05').toISOString(),
+    fechaFin: new Date('2026-01-05').toISOString(),
+    duracionTotalMs: 1800000,
+    duracionEfectivaMs: 1800000,
+    origenAsistencia: true,
+    fechaDia: '2026-01-05',
+  };
+
+  it('el profesor de la asignatura puede crear la sesión sintética', async () => {
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(
+      profesorA.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion)
+    );
+  });
+
+  it('dirección también puede crearla', async () => {
+    const direccion = testEnv.authenticatedContext('dir1').firestore();
+    await assertSucceeds(
+      direccion.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion)
+    );
+  });
+
+  it('un profesor que NO enseña esa asignatura no puede crearla', async () => {
+    const profesorB = testEnv.authenticatedContext('profesorB').firestore();
+    await assertFails(
+      profesorB.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion)
+    );
+  });
+
+  it('rechaza marcarla como origenAsistencia sobre una asignatura sin permiteGrabarEstudio', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('asignaturas').doc('armonia').set({
+        cursoId: 'curso1',
+        nombre: 'Armonía',
+        nombreNormalizado: 'armonía',
+        profesorIds: ['profesorA'],
+        permiteGrabarEstudio: false,
+      });
+      await db.collection('gruposAsignatura').doc('armonía').set({ profesorIds: ['profesorA'] });
+    });
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertFails(
+      profesorA.collection('sesionesEstudio').doc('asistencia_alumno1_armonia_2026-01-05').set({
+        ...sesion,
+        asignaturaId: 'armonia',
+      })
+    );
+  });
+
+  it('el profesor de la asignatura puede borrarla (p.ej. al marcar "faltó")', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion);
+    });
+    const profesorA = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(
+      profesorA.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').delete()
+    );
+  });
+
+  it('un alumno NO puede crear la sesión sintética de OTRO alumno', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('alumno2').set({ permisos: ['alumno'] });
+    });
+    const alumno2 = testEnv.authenticatedContext('alumno2').firestore();
+    await assertFails(
+      alumno2.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion)
+    );
   });
 });

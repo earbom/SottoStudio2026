@@ -17,9 +17,13 @@ import '../direccion/informe_direccion_screen.dart';
 import '../direccion/registro_horario_screen.dart';
 import '../direccion/curso_escolar_screen.dart';
 import '../direccion/importar_datos_screen.dart';
+import '../direccion/pluses_orquesta_screen.dart';
+import '../direccion/horario_general_screen.dart';
+import 'horario_screen.dart';
 import '../comunes/cuadro_de_honor_screen.dart';
 import 'asignaturas_por_nombre_screen.dart';
 import '../alumno/dashboard_alumno_screen.dart';
+import '../alumno/medallas_roscos_screen.dart';
 import 'inicio_screen.dart';
 import 'cambiar_password_screen.dart';
 import 'afinador_screen.dart';
@@ -206,7 +210,7 @@ class _HomeShellState extends State<HomeShell> {
                 ),
                 const Divider(),
               ],
-              if (perfil.esDireccion || perfil.esProfesor) ...[
+              if (perfil.esDireccion) ...[
                 ListTile(
                   leading: const Icon(Icons.people_outline),
                   title: Text(l10n.menuAlumnos),
@@ -264,6 +268,17 @@ class _HomeShellState extends State<HomeShell> {
                   title: Text(l10n.menuImportarDatos),
                   onTap: () => _navegarA(l10n.menuImportarDatos, const ImportarDatosScreen()),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.add_circle_outline),
+                  title: Text(l10n.menuPlusesOrquesta),
+                  onTap: () => _navegarA(l10n.menuPlusesOrquesta, const PlusesOrquestaScreen()),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.calendar_view_week_outlined),
+                  title: Text(l10n.menuHorarioGeneral),
+                  onTap: () =>
+                      _navegarA(l10n.menuHorarioGeneral, HorarioGeneralScreen(perfil: perfil)),
+                ),
                 const Divider(),
               ],
               if (perfil.esProfesor) ...[
@@ -277,6 +292,12 @@ class _HomeShellState extends State<HomeShell> {
                   onTap: () =>
                       _navegarA(l10n.menuMisAsignaturas, AsignaturasPorNombreScreen(perfil: perfil)),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.calendar_today_outlined),
+                  title: Text(l10n.menuMiHorario),
+                  onTap: () => _navegarA(
+                      l10n.menuMiHorario, HorarioScreen(perfil: perfil, modo: HorarioModo.profesor)),
+                ),
                 const Divider(),
               ],
               if (perfil.esAlumno) ...[
@@ -288,6 +309,17 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.music_note_outlined),
                   title: Text(l10n.menuMiEstudio),
                   onTap: () => _navegarA(l10n.menuMiEstudio, DashboardAlumnoScreen(perfil: perfil)),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.emoji_events_outlined),
+                  title: Text(l10n.menuMedallasRoscos),
+                  onTap: () => _navegarA(l10n.menuMedallasRoscos, MedallasRoscosScreen(perfil: perfil)),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.calendar_today_outlined),
+                  title: Text(l10n.menuMiHorario),
+                  onTap: () => _navegarA(
+                      l10n.menuMiHorario, HorarioScreen(perfil: perfil, modo: HorarioModo.alumno)),
                 ),
                 const Divider(),
               ],

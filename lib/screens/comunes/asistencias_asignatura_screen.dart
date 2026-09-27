@@ -30,32 +30,64 @@ class AsistenciasAsignaturaScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final db = DbService();
     return Scaffold(
       appBar: AppBar(title: Text('Asistencias · ${asignatura.nombre}')),
-      body: StreamBuilder<List<Matricula>>(
-        stream: db.matriculasDeAsignatura(asignatura.id!, cursoEscolar: cursoEscolar),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final matriculas = snapshot.data!;
-          if (matriculas.isEmpty) {
-            return const Center(child: Text('Aún no hay alumnos matriculados.'));
-          }
-          return ListView.separated(
-            itemCount: matriculas.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, i) => _FilaAsistenciaHoy(
-              key: ValueKey(matriculas[i].id),
-              matricula: matriculas[i],
-              asignatura: asignatura,
-              perfil: perfil,
-              db: db,
-            ),
-          );
-        },
+      body: CuerpoAsistenciasAsignatura(
+        asignatura: asignatura,
+        perfil: perfil,
+        cursoEscolar: cursoEscolar,
       ),
+    );
+  }
+}
+
+/// Cuerpo reutilizable (sin Scaffold/AppBar propios): usado tanto por
+/// [AsistenciasAsignaturaScreen] en solitario como embebido dentro de
+/// `VistaGlobalAsignaturaScreen`. `dentroDeScroll` desactiva el scroll
+/// propio del `ListView` (con `shrinkWrap`) cuando ya vive dentro del
+/// scroll vertical de la vista global — en solitario, el `Scaffold`
+/// ya le da altura acotada y el `ListView` puede scrollear solo.
+class CuerpoAsistenciasAsignatura extends StatelessWidget {
+  final Asignatura asignatura;
+  final Usuario perfil;
+  final String cursoEscolar;
+  final bool dentroDeScroll;
+
+  const CuerpoAsistenciasAsignatura({
+    super.key,
+    required this.asignatura,
+    required this.perfil,
+    required this.cursoEscolar,
+    this.dentroDeScroll = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final db = DbService();
+    return StreamBuilder<List<Matricula>>(
+      stream: db.matriculasDeAsignatura(asignatura.id!, cursoEscolar: cursoEscolar),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final matriculas = snapshot.data!;
+        if (matriculas.isEmpty) {
+          return const Center(child: Text('Aún no hay alumnos matriculados.'));
+        }
+        return ListView.separated(
+          shrinkWrap: dentroDeScroll,
+          physics: dentroDeScroll ? const NeverScrollableScrollPhysics() : null,
+          itemCount: matriculas.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, i) => _FilaAsistenciaHoy(
+            key: ValueKey(matriculas[i].id),
+            matricula: matriculas[i],
+            asignatura: asignatura,
+            perfil: perfil,
+            db: db,
+          ),
+        );
+      },
     );
   }
 }

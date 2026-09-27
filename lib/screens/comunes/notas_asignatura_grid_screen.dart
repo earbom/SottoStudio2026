@@ -29,10 +29,91 @@ class NotasAsignaturaGridScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final db = DbService();
     return Scaffold(
-      appBar: AppBar(title: Text('Notas · ${asignatura.nombre}')),
-      body: StreamBuilder<List<CriterioEvaluacion>>(
+      appBar: AppBar(
+        title: Text('Notas · ${asignatura.nombre}'),
+        actions: [
+          if (perfil.esProfesor || perfil.esDireccion)
+            IconButton(
+              icon: const Icon(Icons.timer_outlined),
+              tooltip: 'Retraso de visibilidad para el alumno',
+              onPressed: () => _configurarRetraso(context),
+            ),
+        ],
+      ),
+      body: CuerpoNotasAsignatura(
+        asignatura: asignatura,
+        perfil: perfil,
+        cursoEscolar: cursoEscolar,
+      ),
+    );
+  }
+
+  Future<void> _configurarRetraso(BuildContext context) async {
+    final ctrl = TextEditingController(
+      text: asignatura.diasRetrasoVisibilidadNotas > 0
+          ? '${asignatura.diasRetrasoVisibilidadNotas}'
+          : '',
+    );
+    final guardar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Retraso de visibilidad de notas'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Días que tardará una nota nueva en verla el alumno, desde que se pone. '
+              '0 = visible al momento. Tú y dirección siempre la veis al momento.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(labelText: 'Días de retraso'),
+              keyboardType: TextInputType.number,
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+        ],
+      ),
+    );
+    if (guardar != true) return;
+    final dias = int.tryParse(ctrl.text.trim()) ?? 0;
+    await DbService().actualizarAsignatura(asignatura.id!, {'diasRetrasoVisibilidadNotas': dias});
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Retraso de visibilidad guardado.')));
+    }
+  }
+}
+
+/// Cuerpo reutilizable (sin Scaffold/AppBar propios) — ver el mismo
+/// patrón en `CuerpoAsistenciasAsignatura`. Reutilizable tal cual
+/// dentro de `VistaGlobalAsignaturaScreen`: ya está montado sobre
+/// `SingleChildScrollView` anidados, no un `ListView`/`Expanded`, así
+/// que no necesita ningún flag especial para vivir dentro de otro
+/// scroll vertical.
+class CuerpoNotasAsignatura extends StatelessWidget {
+  final Asignatura asignatura;
+  final Usuario perfil;
+  final String cursoEscolar;
+
+  const CuerpoNotasAsignatura({
+    super.key,
+    required this.asignatura,
+    required this.perfil,
+    required this.cursoEscolar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final db = DbService();
+    return StreamBuilder<List<CriterioEvaluacion>>(
         stream: db.criteriosDeAsignatura(asignatura.id!),
         builder: (context, snapCriterios) {
           if (!snapCriterios.hasData) {
@@ -96,7 +177,6 @@ class NotasAsignaturaGridScreen extends StatelessWidget {
             },
           );
         },
-      ),
     );
   }
 }

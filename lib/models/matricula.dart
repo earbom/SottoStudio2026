@@ -25,6 +25,21 @@ class Matricula {
   // aquí asignado (o quien tenga una sustitución activa ese día, ver
   // Sustitucion) puede poner notas o marcar asistencia de este alumno.
   final String profesorId;
+  // Plus de orquesta aplicado a ESTA matrícula ('' = ninguno) —
+  // referencia a plusesOrquesta/{id}. P.ej. matricular a un alumno en
+  // "Orquesta de guitarras" con este campo apuntando al plus que suma
+  // horas semanales a la asignatura "Guitarra" (PlusOrquesta.
+  // asignaturaDestinoId), configurable al matricular. Ver CLAUDE.md.
+  final String plusOrquestaId;
+  // Franja horaria de ESTE alumno en ESTA asignatura ('HH:mm', '' = sin
+  // definir) — la misma franja se aplica a todos los días de
+  // `diasSemana` (una clase de instrumento dura lo mismo cada semana;
+  // para grupales, todo el grupo comparte franja). Base del horario
+  // general de dirección (ver CLAUDE.md): horario de alumno/profesor y
+  // la propagación automática de cambios salen gratis de leer estos
+  // mismos campos vía StreamBuilder, sin un sistema de horario aparte.
+  final String horaInicio;
+  final String horaFin;
 
   Matricula({
     this.id,
@@ -36,6 +51,9 @@ class Matricula {
     this.activa = true,
     this.diasSemana = const [],
     this.profesorId = '',
+    this.plusOrquestaId = '',
+    this.horaInicio = '',
+    this.horaFin = '',
   });
 
   /// ID determinista: matricular es idempotente (set con merge) y a la
@@ -59,6 +77,9 @@ class Matricula {
       activa: data['activa'] ?? true,
       diasSemana: List<int>.from(data['diasSemana'] ?? const []),
       profesorId: data['profesorId'] ?? '',
+      plusOrquestaId: data['plusOrquestaId'] ?? '',
+      horaInicio: data['horaInicio'] ?? '',
+      horaFin: data['horaFin'] ?? '',
     );
   }
 
@@ -72,6 +93,9 @@ class Matricula {
       'activa': activa,
       'diasSemana': diasSemana,
       'profesorId': profesorId,
+      'plusOrquestaId': plusOrquestaId,
+      'horaInicio': horaInicio,
+      'horaFin': horaFin,
     };
   }
 }

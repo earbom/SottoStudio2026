@@ -24,6 +24,15 @@ class Asignatura {
   // informeDireccion()/el ranking global por curso.
   final double horasObjetivoSemanal;
   final double horasObjetivoMensual;
+  // Días que tarda una nota nueva en hacerse visible para el alumno
+  // tras ponerse (0 = visible al momento, como antes). Configurable
+  // por el profesor desde CriteriosEvaluacionScreen, igual que los
+  // objetivos de horas — pedido por dirección. Profesor/dirección
+  // siempre ven la nota al momento; el retraso solo afecta al lado
+  // alumno (_TabNotas/MisNotasScreen filtran en cliente comparando
+  // Nota.fecha + este valor contra la hora actual — no es un campo de
+  // seguridad, así que no hace falta reforzarlo en firestore.rules).
+  final int diasRetrasoVisibilidadNotas;
 
   Asignatura({
     this.id,
@@ -36,6 +45,7 @@ class Asignatura {
     this.permiteGrabarEstudio = false,
     this.horasObjetivoSemanal = 0,
     this.horasObjetivoMensual = 0,
+    this.diasRetrasoVisibilidadNotas = 0,
   });
 
   factory Asignatura.fromMap(String id, Map<String, dynamic> data) {
@@ -50,6 +60,7 @@ class Asignatura {
       permiteGrabarEstudio: data['permiteGrabarEstudio'] ?? false,
       horasObjetivoSemanal: (data['horasObjetivoSemanal'] as num?)?.toDouble() ?? 0,
       horasObjetivoMensual: (data['horasObjetivoMensual'] as num?)?.toDouble() ?? 0,
+      diasRetrasoVisibilidadNotas: (data['diasRetrasoVisibilidadNotas'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -69,6 +80,7 @@ class Asignatura {
       'permiteGrabarEstudio': permiteGrabarEstudio,
       'horasObjetivoSemanal': horasObjetivoSemanal,
       'horasObjetivoMensual': horasObjetivoMensual,
+      'diasRetrasoVisibilidadNotas': diasRetrasoVisibilidadNotas,
     };
   }
 }

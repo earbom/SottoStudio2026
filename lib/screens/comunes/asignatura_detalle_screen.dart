@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/asignatura.dart';
 import '../../models/asistencia.dart';
 import '../../models/matricula.dart';
+import '../../models/plus_orquesta.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 import '../../widgets/selector_curso_escolar.dart';
@@ -22,16 +23,36 @@ const nombresDiasSemana = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 /// CUALQUIER profesor de la asignatura (de cualquier curso que
 /// comparta nombre) puede poner notas o marcar asistencia de
 /// cualquier alumno, no solo el aquí asignado.
-Future<({List<int> dias, String profesorId})?> _configurarMatricula(
+Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaInicio, String horaFin})?>
+    _configurarMatricula(
   BuildContext context, {
   required List<Usuario> profesoresDeLaAsignatura,
+  required List<PlusOrquesta> plusesDisponibles,
   List<int> diasIniciales = const [],
   String profesorIdInicial = '',
+  String plusOrquestaIdInicial = '',
+  String horaInicioInicial = '',
+  String horaFinInicial = '',
 }) {
   final seleccionados = diasIniciales.toSet();
   String profesorId = profesorIdInicial;
+  String plusOrquestaId = plusOrquestaIdInicial;
+  String horaInicio = horaInicioInicial;
+  String horaFin = horaFinInicial;
 
-  return showDialog<({List<int> dias, String profesorId})>(
+  Future<void> elegirHora(
+      BuildContext context, void Function(String) onElegida, String actual) async {
+    final partes = actual.split(':');
+    final inicial = partes.length == 2
+        ? TimeOfDay(hour: int.tryParse(partes[0]) ?? 9, minute: int.tryParse(partes[1]) ?? 0)
+        : const TimeOfDay(hour: 9, minute: 0);
+    final elegida = await showTimePicker(context: context, initialTime: inicial);
+    if (elegida == null) return;
+    onElegida(
+        '${elegida.hour.toString().padLeft(2, '0')}:${elegida.minute.toString().padLeft(2, '0')}');
+  }
+
+  return showDialog<({List<int> dias, String profesorId, String plusOrquestaId, String horaInicio, String horaFin})>(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setStateDialog) => AlertDialog(
@@ -56,6 +77,28 @@ Future<({List<int> dias, String profesorId})?> _configurarMatricula(
                 }),
               ),
               const SizedBox(height: 16),
+              const Text('Horario (misma franja todos los días de clase elegidos)'),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => elegirHora(
+                          context, (h) => setStateDialog(() => horaInicio = h), horaInicio),
+                      child: Text(horaInicio.isEmpty ? 'Hora inicio' : horaInicio),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () =>
+                          elegirHora(context, (h) => setStateDialog(() => horaFin = h), horaFin),
+                      child: Text(horaFin.isEmpty ? 'Hora fin' : horaFin),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               const Text(
                   'Profesor de referencia (informativo — ya no restringe quién puede puntuar)'),
               if (profesoresDeLaAsignatura.isEmpty)
@@ -71,6 +114,20 @@ Future<({List<int> dias, String profesorId})?> _configurarMatricula(
                       .toList(),
                   onChanged: (v) => setStateDialog(() => profesorId = v ?? ''),
                 ),
+              if (plusesDisponibles.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('Plus de orquesta (suma horas extra a otra asignatura)'),
+                DropdownButtonFormField<String>(
+                  initialValue: plusOrquestaId.isEmpty ? null : plusOrquestaId,
+                  hint: const Text('Ninguno'),
+                  items: plusesDisponibles
+                      .map((p) => DropdownMenuItem(
+                          value: p.id,
+                          child: Text('${p.nombre} (+${p.horasSemana.toStringAsFixed(1)} h/sem)')))
+                      .toList(),
+                  onChanged: (v) => setStateDialog(() => plusOrquestaId = v ?? ''),
+                ),
+              ],
             ],
           ),
         ),
@@ -79,8 +136,15 @@ Future<({List<int> dias, String profesorId})?> _configurarMatricula(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancelar')),
           FilledButton(
-            onPressed: () => Navigator.pop(context,
-                (dias: seleccionados.toList()..sort(), profesorId: profesorId)),
+            onPressed: () => Navigator.pop(
+                context,
+                (
+                  dias: seleccionados.toList()..sort(),
+                  profesorId: profesorId,
+                  plusOrquestaId: plusOrquestaId,
+                  horaInicio: horaInicio,
+                  horaFin: horaFin,
+                )),
             child: const Text('Guardar'),
           ),
         ],
@@ -176,6 +240,7 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
             cursoEscolar: cursoEscolar)
         .first;
     final profesores = await _profesoresDeLaAsignatura();
+    final pluses = await _db.plusesOrquesta().first;
     if (!mounted) return;
 
     final idsYaMatriculados = matriculasActuales.map((m) => m.alumnoId).toSet();
@@ -209,41 +274,74 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
     if (!mounted) return;
 
     final config = await _configurarMatricula(context,
-        profesoresDeLaAsignatura: profesores);
+        profesoresDeLaAsignatura: profesores, plusesDisponibles: pluses);
     if (config == null) return;
 
-    await _db.matricular(
-      alumnoId: elegido.uid,
-      asignaturaId: widget.asignatura.id!,
-      cursoId: widget.asignatura.cursoId,
-      cursoEscolar: cursoEscolar,
-      diasSemana: config.dias,
-      profesorId: config.profesorId,
-    );
+    try {
+      await _db.matricular(
+        alumnoId: elegido.uid,
+        asignaturaId: widget.asignatura.id!,
+        cursoId: widget.asignatura.cursoId,
+        cursoEscolar: cursoEscolar,
+        diasSemana: config.dias,
+        profesorId: config.profesorId,
+        plusOrquestaId: config.plusOrquestaId,
+        horaInicio: config.horaInicio,
+        horaFin: config.horaFin,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo matricular: $e')));
+    }
   }
 
   Future<void> _editarMatricula(Matricula matricula) async {
     final profesores = await _profesoresDeLaAsignatura();
+    final pluses = await _db.plusesOrquesta().first;
     if (!mounted) return;
     final config = await _configurarMatricula(
       context,
       profesoresDeLaAsignatura: profesores,
+      plusesDisponibles: pluses,
       diasIniciales: matricula.diasSemana,
       profesorIdInicial: matricula.profesorId,
+      plusOrquestaIdInicial: matricula.plusOrquestaId,
+      horaInicioInicial: matricula.horaInicio,
+      horaFinInicial: matricula.horaFin,
     );
     if (config == null) return;
-    await _db.actualizarDiasClaseMatricula(
-      alumnoId: matricula.alumnoId,
-      asignaturaId: widget.asignatura.id!,
-      cursoEscolar: matricula.cursoEscolar,
-      diasSemana: config.dias,
-    );
-    await _db.actualizarProfesorMatricula(
-      alumnoId: matricula.alumnoId,
-      asignaturaId: widget.asignatura.id!,
-      cursoEscolar: matricula.cursoEscolar,
-      profesorId: config.profesorId,
-    );
+    try {
+      await _db.actualizarDiasClaseMatricula(
+        alumnoId: matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        cursoEscolar: matricula.cursoEscolar,
+        diasSemana: config.dias,
+      );
+      await _db.actualizarProfesorMatricula(
+        alumnoId: matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        cursoEscolar: matricula.cursoEscolar,
+        profesorId: config.profesorId,
+      );
+      await _db.actualizarPlusOrquestaMatricula(
+        alumnoId: matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        cursoEscolar: matricula.cursoEscolar,
+        plusOrquestaId: config.plusOrquestaId,
+      );
+      await _db.actualizarHorarioMatricula(
+        alumnoId: matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        cursoEscolar: matricula.cursoEscolar,
+        horaInicio: config.horaInicio,
+        horaFin: config.horaFin,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo actualizar la matrícula: $e')));
+    }
   }
 
   @override

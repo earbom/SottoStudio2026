@@ -84,6 +84,23 @@ service cloud.firestore {
           /databases/$(database)/documents/sustituciones/$(asignaturaId + '_' + request.auth.uid + '_' + fecha));
     }
 
+    // Sesión de estudio SINTÉTICA generada por DbService al marcar
+    // asistencia en una asignatura de instrumento (ver CLAUDE.md,
+    // horaFin-horaInicio de la matrícula cuenta como horas de estudio):
+    // quien la escribe es quien marca la asistencia (dirección,
+    // profesor de la asignatura o sustituto ese día), no el alumno.
+    // `fechaDia` denormalizado (mismo patrón que Nota.fechaDia) para
+    // que tieneSustitucion() pueda comprobar sin parsear fechas.
+    function esGeneradaPorAsistencia(data) {
+      return data.get('origenAsistencia', false) == true
+          && data.tipo == 'instrumento'
+          && data.get('asignaturaId', null) is string
+          && get(/databases/$(database)/documents/asignaturas/$(data.asignaturaId)).data.get('permiteGrabarEstudio', false) == true
+          && (esDireccion()
+              || esProfesorDeAsignaturaPorNombre(data.asignaturaId)
+              || tieneSustitucion(data.asignaturaId, data.get('fechaDia', '')));
+    }
+
     // ---------------------------------------------------------------
     // usuarios
     // Cada usuario lee/edita su propio documento (salvo permisos).
@@ -158,7 +175,8 @@ service cloud.firestore {
                         && request.resource.data.get('registradoPorProfesorId', '') == request.auth.uid
                         && request.resource.data.tipo == 'teorico'
                         && request.resource.data.get('asignaturaId', null) is string
-                        && esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId));
+                        && esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId))
+                    || esGeneradaPorAsistencia(request.resource.data);
 
       allow update: if (esAlumno()
                         && resource.data.alumnoId == request.auth.uid
@@ -171,9 +189,16 @@ service cloud.firestore {
                         && request.resource.data.asignaturaId == resource.data.asignaturaId
                         && request.resource.data.tipo == resource.data.tipo
                         && request.resource.data.registradoPorProfesorId == request.auth.uid
-                        && esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId));
+                        && esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId))
+                    || (resource.data.get('origenAsistencia', false) == true
+                        && request.resource.data.alumnoId == resource.data.alumnoId
+                        && request.resource.data.asignaturaId == resource.data.asignaturaId
+                        && esGeneradaPorAsistencia(request.resource.data));
 
-      allow delete: if esDireccion();
+      allow delete: if esDireccion()
+                    || (resource.data.get('origenAsistencia', false) == true
+                        && (esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId)
+                            || tieneSustitucion(resource.data.asignaturaId, resource.data.get('fechaDia', ''))));
     }
 
     // ---------------------------------------------------------------
@@ -327,6 +352,20 @@ service cloud.firestore {
       allow read: if estaAutenticado();
       allow create, update: if esDireccion()
                             && request.resource.data.peso >= 0 && request.resource.data.peso <= 100;
+      allow delete: if esDireccion();
+    }
+
+    // ---------------------------------------------------------------
+    // plusesOrquesta
+    // Catálogo de pluses de horas por orquesta (p.ej. "Orquesta de
+    // guitarras" suma horas/semana a "Guitarra"), gestionado por
+    // dirección — se elige uno al matricular (ver
+    // Matricula.plusOrquestaId). Lectura abierta: cualquier profesor
+    // que edite una matrícula necesita ver el catálogo para elegir.
+    // ---------------------------------------------------------------
+    match /plusesOrquesta/{plusId} {
+      allow read: if estaAutenticado();
+      allow create, update: if esDireccion() && request.resource.data.horasSemana >= 0;
       allow delete: if esDireccion();
     }
 

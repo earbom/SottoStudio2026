@@ -7,7 +7,6 @@ import '../../services/ajustes_service.dart';
 import '../../services/db_service.dart';
 import '../../utils/iconos_asignatura.dart';
 import 'asignatura_nombre_cursos_screen.dart';
-import 'secciones_asignatura_screen.dart';
 
 /// Punto de entrada principal a las asignaturas, agrupadas por
 /// NOMBRE (instrumento/materia) en vez de por curso: en la práctica,
@@ -112,25 +111,19 @@ class AsignaturasPorNombreScreen extends StatelessWidget {
               final icono = iconoAsignaturaPorId(entrada.representante.iconoId);
               return InkWell(
                 borderRadius: BorderRadius.circular(16),
-                // Profesor puro (no dirección): menú de secciones
-                // ANTES de elegir curso, para cualquier asignatura (ver
-                // CLAUDE.md). Dirección (incluida dirección+profesor)
-                // conserva el flujo de siempre, que necesita para
-                // matricular/editar matrícula/Criterios/Sustituciones.
+                // Ambos roles pasan por el mismo paso de elegir curso
+                // (orden fijo Asignatura → Curso → Menú, ver CLAUDE.md);
+                // es AsignaturaNombreCursosScreen quien decide, según el
+                // rol, si el siguiente paso es el menú de secciones del
+                // profesor o AsignaturaDetalleScreen de dirección.
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => (perfil.esProfesor && !perfil.esDireccion)
-                        ? SeccionesAsignaturaScreen(
-                            nombreGrupo: entrada.representante.nombre,
-                            asignaturas: entrada.asignaturas,
-                            perfil: perfil,
-                          )
-                        : AsignaturaNombreCursosScreen(
-                            nombreGrupo: entrada.representante.nombre,
-                            asignaturas: entrada.asignaturas,
-                            perfil: perfil,
-                          ),
+                    builder: (_) => AsignaturaNombreCursosScreen(
+                      nombreGrupo: entrada.representante.nombre,
+                      asignaturas: entrada.asignaturas,
+                      perfil: perfil,
+                    ),
                   ),
                 ),
                 child: Column(

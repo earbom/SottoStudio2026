@@ -818,7 +818,22 @@ class _TabNotas extends StatelessWidget {
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final notas = snapshot.data!.where((n) => n.asignaturaId == asignatura.id).toList();
+              final todasLasNotas = snapshot.data!.where((n) => n.asignaturaId == asignatura.id).toList();
+              // Retraso de visibilidad (ver CLAUDE.md, Asignatura.
+              // diasRetrasoVisibilidadNotas): solo se aplica cuando quien
+              // mira es el propio alumno (!puedeGestionar) — profesor y
+              // dirección siempre ven la nota al momento. Se filtra ANTES
+              // de calcular la ponderada/agrupación, para que una nota
+              // todavía no visible tampoco altere esos cálculos (si no,
+              // el alumno notaría el cambio en la ponderada sin ver por
+              // qué, lo que delataría igualmente la nota oculta).
+              final notas = puedeGestionar
+                  ? todasLasNotas
+                  : todasLasNotas
+                      .where((n) => !n.fecha
+                          .add(Duration(days: asignatura.diasRetrasoVisibilidadNotas))
+                          .isAfter(DateTime.now()))
+                      .toList();
 
               final notaPonderada = notas.fold<double>(0, (acc, n) {
                 final criterio = criteriosPorId[n.criterioId];

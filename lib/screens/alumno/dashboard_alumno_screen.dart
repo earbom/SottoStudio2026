@@ -19,41 +19,118 @@ class DashboardAlumnoScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final db = DbService();
+    final esquema = Theme.of(context).colorScheme;
+    final primerNombre = perfil.nombre.trim().split(RegExp(r'\s+')).first;
+    final subtitulo = (perfil.instrumento?.trim().isNotEmpty ?? false)
+        ? 'Instrumento: ${perfil.instrumento}'
+        : 'Aquí tienes tus asignaturas y tu progreso.';
+
     return Scaffold(
       body: ListView(
+        padding: EdgeInsets.zero,
         children: [
-          ListTile(
-            leading: const Icon(Icons.mic_none_outlined),
-            title: const Text('Empezar estudio de instrumento'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => EmpezarEstudioScreen(perfil: perfil)),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.history),
-            title: const Text('Historial de estudio'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) => HistorialEstudioScreen(alumnoId: perfil.uid)),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.grade_outlined),
-            title: const Text('Mis notas'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) => MisNotasScreen(alumnoId: perfil.uid)),
-            ),
-          ),
-          const Divider(height: 1),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text('Mis asignaturas',
-                style: Theme.of(context).textTheme.titleMedium),
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: 2,
+                  right: 0,
+                  width: 110,
+                  height: 30,
+                  child: _Pentagrama(
+                    color: esquema.primary.withValues(alpha: 0.16),
+                    lineas: 5,
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hola, $primerNombre',
+                      style: TextStyle(
+                        fontSize: 27,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                        color: esquema.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitulo,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        color: esquema.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: Row(
+              children: [
+                _accionRapida(
+                  context,
+                  icono: Icons.mic_none_outlined,
+                  etiqueta: 'Empezar\nestudio',
+                  acento: esquema.primary,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => EmpezarEstudioScreen(perfil: perfil)),
+                  ),
+                ),
+                _accionRapida(
+                  context,
+                  icono: Icons.history,
+                  etiqueta: 'Historial\nde estudio',
+                  acento: esquema.secondary,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            HistorialEstudioScreen(alumnoId: perfil.uid)),
+                  ),
+                ),
+                _accionRapida(
+                  context,
+                  icono: Icons.grade_outlined,
+                  etiqueta: 'Mis\nnotas',
+                  acento: esquema.tertiary,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            MisNotasScreen(alumnoId: perfil.uid)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 6),
+            child: Text(
+              'Tus asignaturas',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+                color: esquema.onSurface,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: SizedBox(
+              height: 8,
+              child: _Pentagrama(color: esquema.outlineVariant, lineas: 2),
+            ),
+          ),
+          const SizedBox(height: 8),
           StreamBuilder<String>(
             stream: db.cursoEscolarActivo(),
             builder: (context, snapActivo) {
@@ -75,10 +152,13 @@ class DashboardAlumnoScreen extends StatelessWidget {
                   }
                   final matriculas = snapshot.data!;
                   if (matriculas.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                       child: Text(
-                          'Todavía no estás matriculado en ninguna asignatura.'),
+                        'Todavía no tienes asignaturas. En cuanto dirección '
+                        'te matricule, aparecerán aquí.',
+                        style: TextStyle(color: esquema.onSurfaceVariant),
+                      ),
                     );
                   }
                   return Column(
@@ -92,86 +172,88 @@ class DashboardAlumnoScreen extends StatelessWidget {
                                 }
                                 final icono =
                                     iconoAsignaturaPorId(asignatura.iconoId);
-                                return Card(
-                                  margin: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 6),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            FaIcon(icono.icono,
-                                                size: 18,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .primary),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(asignatura.nombre,
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 16)),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          children: [
-                                            if (asignatura
-                                                .permiteGrabarEstudio) ...[
-                                              Expanded(
-                                                child: FilledButton.icon(
-                                                  onPressed: () =>
-                                                      Navigator.push(
-                                                    context,
-                                                    MaterialPageRoute(
-                                                      builder: (_) =>
-                                                          GrabarEstudioScreen(
-                                                        alumnoId: perfil.uid,
-                                                        instrumento:
-                                                            perfil.instrumento,
-                                                        asignaturaId:
-                                                            asignatura.id!,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  icon: const Icon(
-                                                      Icons.mic_none_outlined),
-                                                  label: const Text(
-                                                      'Grabar estudio'),
-                                                ),
+                                return Container(
+                                  margin: const EdgeInsets.fromLTRB(
+                                      20, 0, 20, 14),
+                                  padding: const EdgeInsets.fromLTRB(
+                                      14, 12, 14, 12),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(
+                                          color: esquema.primary, width: 3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          FaIcon(icono.icono,
+                                              size: 17,
+                                              color: esquema.primary),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              asignatura.nombre,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 16,
+                                                color: esquema.onSurface,
                                               ),
-                                              const SizedBox(width: 8),
-                                            ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          if (asignatura
+                                              .permiteGrabarEstudio) ...[
                                             Expanded(
-                                              child: OutlinedButton.icon(
-                                                onPressed: () => Navigator.push(
+                                              child: FilledButton(
+                                                onPressed: () =>
+                                                    Navigator.push(
                                                   context,
                                                   MaterialPageRoute(
                                                     builder: (_) =>
-                                                        AlumnoEnAsignaturaScreen(
-                                                      alumno: perfil,
-                                                      asignatura: asignatura,
-                                                      perfil: perfil,
-                                                      cursoEscolar:
-                                                          snapActivo.data!,
+                                                        GrabarEstudioScreen(
+                                                      alumnoId: perfil.uid,
+                                                      instrumento:
+                                                          perfil.instrumento,
+                                                      asignaturaId:
+                                                          asignatura.id!,
                                                     ),
                                                   ),
                                                 ),
-                                                icon: const Icon(
-                                                    Icons.insights_outlined),
-                                                label:
-                                                    const Text('Mi progreso'),
+                                                child: const Text(
+                                                    'Grabar estudio'),
                                               ),
                                             ),
+                                            const SizedBox(width: 8),
                                           ],
-                                        ),
-                                      ],
-                                    ),
+                                          Expanded(
+                                            child: OutlinedButton(
+                                              onPressed: () => Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      AlumnoEnAsignaturaScreen(
+                                                    alumno: perfil,
+                                                    asignatura: asignatura,
+                                                    perfil: perfil,
+                                                    cursoEscolar:
+                                                        snapActivo.data!,
+                                                  ),
+                                                ),
+                                              ),
+                                              child:
+                                                  const Text('Mi progreso'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ),
                                 );
                               },
@@ -186,4 +268,85 @@ class DashboardAlumnoScreen extends StatelessWidget {
       ),
     );
   }
+
+  Widget _accionRapida(
+    BuildContext context, {
+    required IconData icono,
+    required String etiqueta,
+    required Color acento,
+    required VoidCallback onTap,
+  }) {
+    final esquema = Theme.of(context).colorScheme;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Column(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: acento.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icono, color: acento, size: 24),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                etiqueta,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
+                  color: esquema.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Cinco líneas finas evocando un pentagrama: motivo visual propio del
+/// centro (conservatorio), reutilizado como flourish bajo el saludo y,
+/// con 2 líneas, como separador de la sección de asignaturas.
+class _Pentagrama extends StatelessWidget {
+  final Color color;
+  final int lineas;
+
+  const _Pentagrama({required this.color, this.lineas = 5});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _PentagramaPainter(color: color, lineas: lineas));
+  }
+}
+
+class _PentagramaPainter extends CustomPainter {
+  final Color color;
+  final int lineas;
+
+  _PentagramaPainter({required this.color, required this.lineas});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pintura = Paint()
+      ..color = color
+      ..strokeWidth = 1.1;
+    final espacio = size.height / (lineas + 1);
+    for (var i = 1; i <= lineas; i++) {
+      final y = espacio * i;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), pintura);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PentagramaPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.lineas != lineas;
 }

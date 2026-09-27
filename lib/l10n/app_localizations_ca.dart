@@ -80,6 +80,12 @@ class AppLocalizationsCa extends AppLocalizations {
   String get menuImportarDatos => 'Importar dades des d\'Excel';
 
   @override
+  String get menuPlusesOrquesta => 'Plusos d\'orquestra';
+
+  @override
+  String get menuHorarioGeneral => 'Horari general';
+
+  @override
   String get menuDocencia => 'Docència';
 
   @override
@@ -87,6 +93,12 @@ class AppLocalizationsCa extends AppLocalizations {
 
   @override
   String get menuMiEstudio => 'El meu estudi';
+
+  @override
+  String get menuMedallasRoscos => 'Medalles i roscos';
+
+  @override
+  String get menuMiHorario => 'El meu horari';
 
   @override
   String get menuMiJornadaLaboral => 'La meva jornada laboral';
