@@ -6,10 +6,12 @@ import '../../models/asignatura.dart';
 import '../../models/matricula.dart';
 import '../../models/usuario.dart';
 import '../../services/ajustes_service.dart';
-import '../../services/auth_service.dart';
 import '../../services/db_service.dart';
 import '../../utils/iconos_asignatura.dart';
 import '../comunes/asignatura_detalle_screen.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
+import 'formulario_asignatura.dart';
 
 class CursoDetalleScreen extends StatefulWidget {
   final Curso curso;
@@ -24,182 +26,6 @@ class CursoDetalleScreen extends StatefulWidget {
 
 class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
   final DbService _db = DbService();
-  final AuthService _auth = AuthService();
-
-  Future<
-      ({
-        String nombre,
-        List<String> profesorIds,
-        String iconoId,
-        bool permiteGrabarEstudio,
-      })?> _mostrarFormularioAsignatura({
-    String nombreInicial = '',
-    List<String> profesorIdsIniciales = const [],
-    String iconoIdInicial = '',
-    bool permiteGrabarEstudioInicial = false,
-  }) async {
-    final controladorNombre = TextEditingController(text: nombreInicial);
-    final profesoresSeleccionados = profesorIdsIniciales.toSet();
-    String iconoId = iconoIdInicial.isEmpty
-        ? iconosAsignaturaDisponibles.first.id
-        : iconoIdInicial;
-    var permiteGrabarEstudio = permiteGrabarEstudioInicial;
-    final profesores = await _db.profesoresDelCentro().first;
-    if (!mounted) return null;
-
-    return showDialog<
-        ({
-          String nombre,
-          List<String> profesorIds,
-          String iconoId,
-          bool permiteGrabarEstudio,
-        })>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setStateDialog) => AlertDialog(
-          title: Text(
-              nombreInicial.isEmpty ? 'Nueva asignatura' : 'Editar asignatura'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: controladorNombre,
-                  decoration: const InputDecoration(
-                      labelText: 'Nombre (ej. Violín, Lenguaje musical...)'),
-                  autofocus: true,
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Permite grabar estudio'),
-                  subtitle: const Text(
-                      'Solo para instrumento: el alumno podrá grabar sesiones de práctica en esta asignatura.'),
-                  value: permiteGrabarEstudio,
-                  onChanged: (v) =>
-                      setStateDialog(() => permiteGrabarEstudio = v),
-                ),
-                const SizedBox(height: 4),
-                const Text('Icono'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: iconosAsignaturaDisponibles.map((icono) {
-                    final seleccionado = icono.id == iconoId;
-                    return Tooltip(
-                      message: icono.etiqueta,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(24),
-                        onTap: () => setStateDialog(() => iconoId = icono.id),
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: seleccionado
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest,
-                            border: seleccionado
-                                ? Border.all(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    width: 2)
-                                : null,
-                          ),
-                          child: Center(
-                            child: FaIcon(
-                              icono.icono,
-                              size: 20,
-                              color: seleccionado
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 16),
-                const Text('Profesorado'),
-                if (profesores.isEmpty)
-                  const Text('No hay profesores dados de alta todavía.',
-                      style: TextStyle(fontStyle: FontStyle.italic)),
-                ...profesores.map((p) => CheckboxListTile(
-                      dense: true,
-                      title: Text(p.nombre),
-                      value: profesoresSeleccionados.contains(p.uid),
-                      onChanged: (v) => setStateDialog(() {
-                        v == true
-                            ? profesoresSeleccionados.add(p.uid)
-                            : profesoresSeleccionados.remove(p.uid);
-                      }),
-                    )),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar')),
-            FilledButton(
-              onPressed: () => Navigator.pop(
-                context,
-                (
-                  nombre: controladorNombre.text.trim(),
-                  profesorIds: profesoresSeleccionados.toList(),
-                  iconoId: iconoId,
-                  permiteGrabarEstudio: permiteGrabarEstudio,
-                ),
-              ),
-              child: const Text('Guardar'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _crearAsignatura() async {
-    final resultado = await _mostrarFormularioAsignatura();
-    if (resultado == null || resultado.nombre.isEmpty) return;
-
-    final uid = _auth.usuarioActual?.uid ?? '';
-    await _db.crearAsignatura(Asignatura(
-      cursoId: widget.curso.id!,
-      nombre: resultado.nombre,
-      profesorIds: resultado.profesorIds,
-      createdAt: DateTime.now(),
-      createdBy: uid,
-      iconoId: resultado.iconoId,
-      permiteGrabarEstudio: resultado.permiteGrabarEstudio,
-    ));
-  }
-
-  Future<void> _editarAsignatura(Asignatura asignatura) async {
-    final resultado = await _mostrarFormularioAsignatura(
-      nombreInicial: asignatura.nombre,
-      profesorIdsIniciales: asignatura.profesorIds,
-      iconoIdInicial: asignatura.iconoId,
-      permiteGrabarEstudioInicial: asignatura.permiteGrabarEstudio,
-    );
-    if (resultado == null || resultado.nombre.isEmpty) return;
-
-    await _db.actualizarAsignatura(asignatura.id!, {
-      'nombre': resultado.nombre,
-      'profesorIds': resultado.profesorIds,
-      'iconoId': resultado.iconoId,
-      'permiteGrabarEstudio': resultado.permiteGrabarEstudio,
-    });
-  }
 
   Future<void> _eliminarAsignatura(Asignatura asignatura) async {
     final confirmar = await showDialog<bool>(
@@ -224,7 +50,7 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
       await _db.eliminarAsignatura(asignatura.id!);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo eliminar la asignatura.'))));
     }
   }
 
@@ -235,6 +61,9 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
       body: StreamBuilder<String>(
         stream: _db.cursoEscolarActivo(),
         builder: (context, snapActivo) {
+          if (snapActivo.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapActivo.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -242,6 +71,9 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
           return StreamBuilder<List<Asignatura>>(
             stream: _db.asignaturasDeCurso(widget.curso.id!),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const ErrorCarga();
+              }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -313,9 +145,9 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
                                       fontWeight: FontWeight.w600),
                                 ),
                                 Text(
-                                  '$nMatriculados alumno(s)',
+                                  '$nMatriculados ${nMatriculados == 1 ? 'alumno' : 'alumnos'}',
                                   style: TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 12,
                                       color: Theme.of(context)
                                           .colorScheme
                                           .outline),
@@ -330,7 +162,7 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
                                 tooltip: 'Opciones',
                                 onSelected: (v) {
                                   if (v == 'editar') {
-                                    _editarAsignatura(asignatura);
+                                    editarAsignatura(context, asignatura);
                                   }
                                   if (v == 'eliminar') {
                                     _eliminarAsignatura(asignatura);
@@ -356,9 +188,10 @@ class _CursoDetalleScreenState extends State<CursoDetalleScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _crearAsignatura,
-        child: const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => crearAsignaturaEnCurso(context, widget.curso.id!),
+        icon: const Icon(Icons.add),
+        label: const Text('Nueva asignatura'),
       ),
     );
   }

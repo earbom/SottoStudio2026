@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/asignatura.dart';
 import '../../models/curso.dart';
 import '../../models/usuario.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 typedef _FilaBloque = ({String alumnoId, String alumnoNombre, String asignaturaId, double horasEfectivasMes});
@@ -85,6 +86,9 @@ class _ListaAgrupadaPorBloques extends StatelessWidget {
           future: Future.wait([db.todasLasAsignaturas().first, db.cursos().first]).then(
               (r) => (r[0] as List<Asignatura>, r[1] as List<Curso>)),
           builder: (context, snapRef) {
+            if (snapRef.hasError) {
+              return const ErrorCarga();
+            }
             if (!snapRef.hasData) {
               return const Center(child: CircularProgressIndicator());
             }

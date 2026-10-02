@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../utils/mensaje_error.dart';
 import '../../services/auth_service.dart';
 
 class CrearProfesorScreen extends StatefulWidget {
@@ -42,7 +43,7 @@ class _CrearProfesorScreenState extends State<CrearProfesorScreen> {
       if (!mounted) return;
       Navigator.pop(context);
     } catch (e) {
-      setState(() => _error = 'No se pudo crear el profesor: $e');
+      setState(() => _error = mensajeError(e, porDefecto: 'No se pudo crear el profesor. Inténtalo de nuevo.'));
     } finally {
       if (mounted) setState(() => _cargando = false);
     }

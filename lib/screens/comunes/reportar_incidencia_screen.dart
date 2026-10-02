@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/incidencia.dart';
 import '../../models/usuario.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 /// Cualquier usuario autenticado (alumno, profesor o dirección) puede
@@ -130,6 +131,9 @@ class _ReportarIncidenciaScreenState extends State<ReportarIncidenciaScreen> {
             child: StreamBuilder<List<Incidencia>>(
               stream: _db.misIncidencias(widget.perfil.uid),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const ErrorCarga();
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/curso.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../widgets/error_carga.dart';
 import '../../widgets/selector_curso_escolar.dart';
 
 /// Vista clave de dirección: horas efectivas del MES ACTUAL de todos
@@ -10,9 +11,9 @@ import '../../widgets/selector_curso_escolar.dart';
 /// escolar), agrupadas por curso (mismo agrupamiento que Alumnos y
 /// Cuadro de honor) y ordenadas de mayor a menor dentro de cada grupo.
 /// Si el alumno tiene un objetivo mensual combinado (suma de
-/// `horasObjetivoMensual` de los CURSOS DISTINTOS entre sus asignaturas
-/// matriculadas — el objetivo es por curso, no por asignatura), se
-/// colorea en verde si lo alcanza y en rojo si no — sin objetivo
+/// `Asignatura.horasObjetivoMensual` de sus asignaturas matriculadas —
+/// cada asignatura tiene su propia cantidad de horas, ver CLAUDE.md),
+/// se colorea en verde si lo alcanza y en rojo si no — sin objetivo
 /// definido no se colorea.
 class InformeDireccionScreen extends StatefulWidget {
   const InformeDireccionScreen({super.key});
@@ -71,6 +72,9 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
     return StreamBuilder<String>(
       stream: _db.cursoEscolarActivo(),
       builder: (context, snapActivo) {
+        if (snapActivo.hasError) {
+          return const Scaffold(body: ErrorCarga());
+        }
         if (!snapActivo.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
@@ -96,6 +100,9 @@ class _InformeDireccionScreenState extends State<InformeDireccionScreen> {
                 child: StreamBuilder<List<Map<String, dynamic>>>(
                   stream: _db.informeDireccion(cursoEscolar: cursoEscolar),
                   builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const ErrorCarga();
+                    }
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }

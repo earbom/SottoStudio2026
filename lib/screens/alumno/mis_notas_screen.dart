@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/nota.dart';
 import '../../models/asignatura.dart';
 import '../../models/criterio_evaluacion.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 /// Todas las notas del alumno, agrupadas por asignatura, con la nota
@@ -20,6 +21,9 @@ class MisNotasScreen extends StatelessWidget {
       body: StreamBuilder<List<Nota>>(
         stream: db.notasDeAlumno(alumnoId),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -75,7 +79,7 @@ class MisNotasScreen extends StatelessWidget {
                                 children: [
                                   Text(nombreAsignatura,
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('Ponderada: ${notaPonderada.toStringAsFixed(2)}',
+                                  Text('Nota final: ${notaPonderada.toStringAsFixed(2).replaceAll('.', ',')}',
                                       style: const TextStyle(fontWeight: FontWeight.bold)),
                                 ],
                               ),

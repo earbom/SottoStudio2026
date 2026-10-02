@@ -4,6 +4,8 @@ import '../../models/matricula.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 import '../../utils/curso_escolar.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
 import '../../widgets/selector_curso_escolar.dart';
 
 class _FilaHoras {
@@ -78,6 +80,9 @@ class _HorasAsignaturaScreenState extends State<HorasAsignaturaScreen> {
     return StreamBuilder<String>(
       stream: _db.cursoEscolarActivo(),
       builder: (context, snapActivo) {
+        if (snapActivo.hasError) {
+          return const Scaffold(body: ErrorCarga());
+        }
         if (!snapActivo.hasData) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -176,7 +181,7 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo guardar: $e')),
+        SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudieron guardar las horas.'))),
       );
     }
   }
@@ -192,6 +197,9 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
     return StreamBuilder<List<Matricula>>(
       stream: _db.matriculasDeAsignatura(widget.asignatura.id!, cursoEscolar: widget.cursoEscolar),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const ErrorCarga();
+        }
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -203,6 +211,9 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
         return FutureBuilder<List<_FilaHoras>>(
           future: _cargarFilas(matriculas, meses),
           builder: (context, snapFilas) {
+            if (snapFilas.hasError) {
+              return const ErrorCarga();
+            }
             if (!snapFilas.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -243,26 +254,31 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
               ),
             );
 
-            final banner = objetivo > 0
-                ? Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: Text('Objetivo mensual: ${objetivo.toStringAsFixed(1)} h efectivas'),
-                  )
-                : null;
+            final textosBanner = [
+              if (objetivo > 0)
+                'Objetivo: ${objetivo.toStringAsFixed(1)} h de estudio al mes (verde = cumplido, rojo = no llega).',
+              editable
+                  ? 'Toca una casilla para anotar las horas de estudio de ese mes.'
+                  : 'Horas grabadas por el alumno con el micrófono (no se editan a mano).',
+            ];
+            final Widget banner = Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: Text(textosBanner.join('\n')),
+            );
 
             if (widget.dentroDeScroll) {
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [if (banner != null) banner, tabla],
+                children: [banner, tabla],
               );
             }
 
             return Column(
               children: [
-                if (banner != null) banner,
+                banner,
                 Expanded(child: SingleChildScrollView(child: tabla)),
               ],
             );
@@ -280,8 +296,8 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
       final sesiones = await _db
           .sesionesDeAlumnoEnAsignatura(alumnoId: matricula.alumnoId, asignaturaId: matricula.asignaturaId)
           .first;
-      // Plus de orquesta (ver CLAUDE.md): aproximación horasSemana × 4
-      // por mes, mismo criterio ya usado en la app para "objetivo
+      // Plus de orquesta (ver CLAUDE.md): aproximación minutosSemana × 4
+      // / 60 por mes, mismo criterio ya usado en la app para "objetivo
       // anual = mensual × 12" (punto 17) — solo cuenta desde el mes en
       // que empezó la matrícula que lo aplica, no hacia atrás.
       final pluses = await _db.plusesOrquestaAplicablesDeAlumno(
@@ -296,7 +312,7 @@ class _CuerpoHorasAsignaturaState extends State<CuerpoHorasAsignatura> {
             .fold<int>(0, (acc, s) => acc + s.duracionEfectivaMs);
         final plusMes = pluses
             .where((p) => !p.desde.isAfter(finMes))
-            .fold<double>(0, (acc, p) => acc + p.horasSemana * 4);
+            .fold<double>(0, (acc, p) => acc + p.minutosSemana * 4 / 60.0);
         return ms / 3600000 + plusMes;
       }).toList();
       filas.add(_FilaHoras(alumno, horasPorMes));

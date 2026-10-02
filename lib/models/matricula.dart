@@ -40,6 +40,14 @@ class Matricula {
   // mismos campos vía StreamBuilder, sin un sistema de horario aparte.
   final String horaInicio;
   final String horaFin;
+  // Franja horaria de GRUPO elegida para este alumno ('' = ninguna,
+  // caso normal para instrumento) — referencia a un elemento de
+  // `Asignatura.franjasHorario`. `diasSemana`/`horaInicio`/`horaFin` de
+  // arriba siguen siendo la fuente que lee el horario general (copiados
+  // de la franja al elegirla, ver `DbService.asignarFranjaMatricula`);
+  // este campo solo sirve para saber A CUÁL re-sincronizar si la franja
+  // se edita o borra después. Ver CLAUDE.md punto 69.
+  final String franjaHorarioId;
 
   Matricula({
     this.id,
@@ -54,6 +62,7 @@ class Matricula {
     this.plusOrquestaId = '',
     this.horaInicio = '',
     this.horaFin = '',
+    this.franjaHorarioId = '',
   });
 
   /// ID determinista: matricular es idempotente (set con merge) y a la
@@ -80,6 +89,7 @@ class Matricula {
       plusOrquestaId: data['plusOrquestaId'] ?? '',
       horaInicio: data['horaInicio'] ?? '',
       horaFin: data['horaFin'] ?? '',
+      franjaHorarioId: data['franjaHorarioId'] ?? '',
     );
   }
 
@@ -96,6 +106,7 @@ class Matricula {
       'plusOrquestaId': plusOrquestaId,
       'horaInicio': horaInicio,
       'horaFin': horaFin,
+      'franjaHorarioId': franjaHorarioId,
     };
   }
 }

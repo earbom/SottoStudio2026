@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../widgets/panel_inicio.dart';
+import 'package:provider/provider.dart';
+import '../../services/ajustes_service.dart';
+import 'ayuda_screen.dart';
 
 /// Pantalla de bienvenida tras el login. No depende del permiso del
 /// usuario: el acceso a cada sección (informe, cursos, mi estudio...)
@@ -13,8 +17,11 @@ import '../../services/db_service.dart';
 /// última visita y aviso si llevan varios días sin estudiar.
 class InicioScreen extends StatefulWidget {
   final Usuario perfil;
+  // Para que las tarjetas de avisos abran su sección dentro de
+  // HomeShell (con la barra de título), igual que el menú lateral.
+  final IrASeccion irA;
 
-  const InicioScreen({super.key, required this.perfil});
+  const InicioScreen({super.key, required this.perfil, required this.irA});
 
   @override
   State<InicioScreen> createState() => _InicioScreenState();
@@ -83,7 +90,8 @@ class _InicioScreenState extends State<InicioScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 360),
+                  constraints: BoxConstraints(
+                      maxWidth: (widget.perfil.esDireccion || widget.perfil.esProfesor) ? 220 : 360),
                   child: esOscuro
                       // El logo es monocromo negro sobre fondo
                       // transparente: para que se vea en modo oscuro
@@ -131,6 +139,61 @@ class _InicioScreenState extends State<InicioScreen> {
                               ))
                           .toList(),
                     ),
+                  ),
+                ],
+                if (!context.watch<AjustesService>().bienvenidaVista) ...[
+                  const SizedBox(height: 24),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: Card(
+                      color: esquema.primaryContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(l10n.inicioBienvenidaTitulo,
+                                style: TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.bold, color: esquema.onPrimaryContainer)),
+                            const SizedBox(height: 8),
+                            Text(l10n.inicioBienvenidaTexto, style: TextStyle(color: esquema.onPrimaryContainer)),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                FilledButton.icon(
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => AyudaScreen(perfil: widget.perfil)),
+                                  ),
+                                  icon: const Icon(Icons.help_outline),
+                                  label: Text(l10n.inicioBienvenidaVerAyuda),
+                                ),
+                                TextButton(
+                                  onPressed: () => context.read<AjustesService>().cambiarBienvenidaVista(true),
+                                  child: Text(l10n.inicioBienvenidaCerrar),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (widget.perfil.esDireccion) ...[
+                  const SizedBox(height: 24),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: PanelAvisosDireccion(irA: widget.irA),
+                  ),
+                ],
+                if (widget.perfil.esProfesor) ...[
+                  const SizedBox(height: 24),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: ClasesDeHoyProfesor(perfil: widget.perfil),
                   ),
                 ],
               ],

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -9,6 +10,9 @@ import '../../models/criterio_evaluacion.dart';
 import '../../models/usuario.dart';
 import '../../services/auth_service.dart';
 import '../../services/db_service.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
+import '../../utils/validacion_nota.dart';
 
 /// Vista de un alumno concreto dentro de una asignatura: calendario de
 /// asistencia + horas de estudio, estadísticas (tabla y gráficas), y
@@ -303,7 +307,7 @@ class _TabCalendarioState extends State<_TabCalendario> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo marcar: $e')),
+        SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo marcar la asistencia.'))),
       );
     }
   }
@@ -316,7 +320,9 @@ class _TabCalendarioState extends State<_TabCalendario> {
     return Column(
       children: [
         TableCalendar(
-          headerStyle: const HeaderStyle(formatButtonVisible: false),
+          headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+          locale: Localizations.localeOf(context).toLanguageTag(),
+          startingDayOfWeek: StartingDayOfWeek.monday,
           firstDay: DateTime.now().subtract(const Duration(days: 365)),
           lastDay: DateTime.now().add(const Duration(days: 30)),
           focusedDay: _diaEnfocado,
@@ -333,6 +339,33 @@ class _TabCalendarioState extends State<_TabCalendario> {
               if (widget.esVistaPropia) return _construirDiaEstudio(context, day);
               return _construirDiaAsistencia(context, day);
             },
+          ),
+        ),
+        // Leyenda: los colores del calendario no se explicaban en
+        // ningún sitio (y el color solo no basta para daltónicos).
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: widget.esVistaPropia
+                ? [
+                    if (_objetivoDiarioHoras > 0) ...[
+                      const _Leyenda(color: Colors.green, texto: 'Objetivo del día cumplido'),
+                      _Leyenda(color: Colors.amber.shade700, texto: 'Estudió, pero menos'),
+                      const _Leyenda(color: Colors.red, texto: 'No estudió'),
+                    ] else
+                      const _Leyenda(color: Colors.green, texto: 'Día con estudio'),
+                  ]
+                : [
+                    const _Leyenda(color: Colors.green, texto: 'Asistió'),
+                    const _Leyenda(color: Colors.orange, texto: 'Retraso'),
+                    const _Leyenda(color: Colors.red, texto: 'Faltó'),
+                    _Leyenda(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        texto: 'Día de clase sin marcar',
+                        relleno: true),
+                  ],
           ),
         ),
         if (widget.esVistaPropia && _objetivoDiarioHoras > 0)
@@ -575,6 +608,9 @@ class _TabEstadisticas extends StatelessWidget {
             ? 0.0
             : ultimasSemanas.map((k) => semanas[k]!).reduce((a, b) => a + b) / ultimasSemanas.length;
 
+        final escala = _escalaEjeHoras(
+            ultimasSemanas.isEmpty ? 0 : ultimasSemanas.map((k) => semanas[k]!).reduce((a, b) => a > b ? a : b));
+
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -642,16 +678,27 @@ class _TabEstadisticas extends StatelessWidget {
             ),
             const SizedBox(height: 32),
             if (ultimasSemanas.isNotEmpty) ...[
-              const Text('Horas de estudio por semana', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(escala.enMinutos ? 'Minutos de estudio por semana' : 'Horas de estudio por semana',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               SizedBox(
                 height: 200,
                 child: BarChart(
                   BarChartData(
+                    minY: 0,
+                    maxY: escala.maxY,
+                    barTouchData: BarTouchData(
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipItem: (grupo, _, barra, __) => BarTooltipItem(
+                          '${_formatearValorEje(barra.toY)} ${escala.enMinutos ? 'min' : 'h'}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
                     barGroups: [
                       for (var i = 0; i < ultimasSemanas.length; i++)
                         BarChartGroupData(x: i, barRods: [
-                          BarChartRodData(toY: semanas[ultimasSemanas[i]]!, width: 18),
+                          BarChartRodData(toY: semanas[ultimasSemanas[i]]! * escala.factor, width: 18),
                         ]),
                     ],
                     titlesData: FlTitlesData(
@@ -663,17 +710,31 @@ class _TabEstadisticas extends StatelessWidget {
                             if (i < 0 || i >= ultimasSemanas.length) return const SizedBox.shrink();
                             return Padding(
                               padding: const EdgeInsets.only(top: 4),
-                              child: Text(ultimasSemanas[i].substring(5), style: const TextStyle(fontSize: 10)),
+                              child: Text(ultimasSemanas[i].substring(5), style: const TextStyle(fontSize: 12)),
                             );
                           },
                         ),
                       ),
-                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 32)),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 40,
+                          interval: escala.intervalo,
+                          getTitlesWidget: (value, meta) => SideTitleWidget(
+                            meta: meta,
+                            child: Text(_formatearValorEje(value), style: const TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ),
                       topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                       rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     ),
                     borderData: FlBorderData(show: false),
-                    gridData: const FlGridData(show: true),
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      horizontalInterval: escala.intervalo,
+                    ),
                   ),
                 ),
               ),
@@ -747,29 +808,119 @@ class _TabNotas extends StatelessWidget {
     final valorCtrl = TextEditingController();
     final comentarioCtrl = TextEditingController();
     CriterioEvaluacion criterioElegido = preseleccionado ?? criterios.first;
+    String? error;
 
-    final crear = await showDialog<bool>(
+    final valor = await showDialog<double>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          void guardar() {
+            final v = parsearValorNota(valorCtrl.text);
+            if (v == null) {
+              setStateDialog(() => error = mensajeErrorValorNota);
+              return;
+            }
+            Navigator.pop(context, v);
+          }
+
+          return AlertDialog(
+            title: const Text('Nueva nota'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<CriterioEvaluacion>(
+                  initialValue: criterioElegido,
+                  decoration: const InputDecoration(labelText: 'Criterio'),
+                  items: criterios
+                      .map((c) => DropdownMenuItem(
+                            value: c,
+                            child: Text('${c.nombre} (${c.peso.toStringAsFixed(0)}%)'),
+                          ))
+                      .toList(),
+                  onChanged: (c) => setStateDialog(() => criterioElegido = c!),
+                ),
+                TextField(
+                  controller: valorCtrl,
+                  decoration: InputDecoration(labelText: 'Nota (0-10)', errorText: error),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onSubmitted: (_) => guardar(),
+                ),
+                TextField(
+                  controller: comentarioCtrl,
+                  decoration: const InputDecoration(labelText: 'Comentario (opcional)'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+              FilledButton(onPressed: guardar, child: const Text('Guardar')),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (valor == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await db.crearNota(Nota(
+        alumnoId: alumno.uid,
+        profesorId: perfil.uid,
+        asignaturaId: asignatura.id!,
+        criterioId: criterioElegido.id!,
+        valor: valor,
+        comentario: comentarioCtrl.text.trim(),
+        fecha: DateTime.now(),
+      ));
+      messenger.showSnackBar(SnackBar(content: Text('Nota guardada: ${valor.toStringAsFixed(1)}')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('No se pudo guardar la nota. Comprueba la conexión o que tengas permiso en esta asignatura.')));
+    }
+  }
+
+  // Dirección siempre; el profesor que la puso, mientras siga pendiente
+  // de validar (mismo criterio que firestore.rules).
+  bool _puedeCorregir(Nota nota) =>
+      puedeGestionar &&
+      (perfil.esDireccion || (nota.profesorId == perfil.uid && nota.estado == EstadoNota.pendiente));
+
+  Widget _filaNota(BuildContext context, Nota nota) {
+    final f = nota.fecha;
+    final fecha = '${f.day.toString().padLeft(2, '0')}/${f.month.toString().padLeft(2, '0')}/${f.year}';
+    final lineas = [
+      if (nota.comentario.isNotEmpty) nota.comentario,
+      '$fecha · ${nota.estado.etiqueta}',
+    ];
+    return ListTile(
+      title: Text(nota.valor.toStringAsFixed(1).replaceAll('.', ',')),
+      subtitle: Text(lineas.join('\n')),
+      isThreeLine: lineas.length > 1,
+      trailing: _puedeCorregir(nota)
+          ? IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Corregir o borrar esta nota',
+              onPressed: () => _corregirNota(context, nota),
+            )
+          : null,
+    );
+  }
+
+  Future<void> _corregirNota(BuildContext context, Nota nota) async {
+    final valorCtrl = TextEditingController(text: nota.valor.toStringAsFixed(1).replaceAll('.', ','));
+    final comentarioCtrl = TextEditingController(text: nota.comentario);
+    String? error;
+    final accion = await showDialog<String>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) => AlertDialog(
-          title: const Text('Nueva nota'),
+          title: const Text('Corregir nota'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              DropdownButtonFormField<CriterioEvaluacion>(
-                initialValue: criterioElegido,
-                decoration: const InputDecoration(labelText: 'Criterio'),
-                items: criterios
-                    .map((c) => DropdownMenuItem(
-                          value: c,
-                          child: Text('${c.nombre} (${c.peso.toStringAsFixed(0)}%)'),
-                        ))
-                    .toList(),
-                onChanged: (c) => setStateDialog(() => criterioElegido = c!),
-              ),
               TextField(
                 controller: valorCtrl,
-                decoration: const InputDecoration(labelText: 'Valor (0-10)'),
+                decoration: InputDecoration(labelText: 'Nota (0-10)', errorText: error),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
               TextField(
@@ -779,25 +930,56 @@ class _TabNotas extends StatelessWidget {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () => Navigator.pop(context, 'borrar'),
+              child: const Text('Borrar nota'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            FilledButton(
+              onPressed: () {
+                if (parsearValorNota(valorCtrl.text) == null) {
+                  setStateDialog(() => error = mensajeErrorValorNota);
+                  return;
+                }
+                Navigator.pop(context, 'guardar');
+              },
+              child: const Text('Guardar'),
+            ),
           ],
         ),
       ),
     );
-
-    if (crear != true) return;
-    final valor = double.tryParse(valorCtrl.text.replaceAll(',', '.')) ?? 0;
-
-    await db.crearNota(Nota(
-      alumnoId: alumno.uid,
-      profesorId: perfil.uid,
-      asignaturaId: asignatura.id!,
-      criterioId: criterioElegido.id!,
-      valor: valor,
-      comentario: comentarioCtrl.text.trim(),
-      fecha: DateTime.now(),
-    ));
+    if (accion == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (accion == 'borrar') {
+        final seguro = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Borrar nota'),
+            content: Text('¿Borrar la nota ${nota.valor.toStringAsFixed(1).replaceAll('.', ',')}? No se puede deshacer.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Borrar'),
+              ),
+            ],
+          ),
+        );
+        if (seguro != true) return;
+        await db.eliminarNota(nota.id!);
+        messenger.showSnackBar(const SnackBar(content: Text('Nota borrada.')));
+      } else {
+        await db.actualizarNota(nota.id!,
+            valor: parsearValorNota(valorCtrl.text)!, comentario: comentarioCtrl.text.trim());
+        messenger.showSnackBar(const SnackBar(content: Text('Nota corregida.')));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo guardar el cambio.'))));
+    }
   }
 
   @override
@@ -805,6 +987,9 @@ class _TabNotas extends StatelessWidget {
     return StreamBuilder<List<CriterioEvaluacion>>(
       stream: db.criteriosDeAsignatura(asignatura.id!),
       builder: (context, snapCriterios) {
+        if (snapCriterios.hasError) {
+          return const Scaffold(body: ErrorCarga());
+        }
         if (!snapCriterios.hasData) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -815,6 +1000,9 @@ class _TabNotas extends StatelessWidget {
           body: StreamBuilder<List<Nota>>(
             stream: db.notasDeAlumno(alumno.uid),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const ErrorCarga();
+              }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -900,15 +1088,7 @@ class _TabNotas extends StatelessWidget {
                                   )
                                 else
                                   for (final nota in notasPorCriterio[criterio.id]!)
-                                    ListTile(
-                                      title: Text(nota.valor.toStringAsFixed(1)),
-                                      subtitle: Text(
-                                        nota.comentario.isEmpty
-                                            ? 'Estado: ${nota.estado.name}'
-                                            : '${nota.comentario}\nEstado: ${nota.estado.name}',
-                                      ),
-                                      isThreeLine: nota.comentario.isNotEmpty,
-                                    ),
+                                    _filaNota(context, nota),
                                 const Divider(height: 1),
                               ],
                               if (notasSinCriterio.isNotEmpty) ...[
@@ -918,15 +1098,7 @@ class _TabNotas extends StatelessWidget {
                                       style: TextStyle(fontWeight: FontWeight.bold)),
                                 ),
                                 for (final nota in notasSinCriterio)
-                                  ListTile(
-                                    title: Text(nota.valor.toStringAsFixed(1)),
-                                    subtitle: Text(
-                                      nota.comentario.isEmpty
-                                          ? 'Estado: ${nota.estado.name}'
-                                          : '${nota.comentario}\nEstado: ${nota.estado.name}',
-                                    ),
-                                    isThreeLine: nota.comentario.isNotEmpty,
-                                  ),
+                                  _filaNota(context, nota),
                               ],
                             ],
                           ),
@@ -943,6 +1115,66 @@ class _TabNotas extends StatelessWidget {
               : null,
         );
       },
+    );
+  }
+}
+
+/// Escala del eje Y de la gráfica de horas por semana: siempre 4 marcas
+/// con valores "redondos" (múltiplos de 1, 2 o 5 × 10^n) calculados a
+/// partir del máximo, en vez de dejar que fl_chart elija el intervalo —
+/// con valores pequeños generaba decenas de etiquetas con muchos
+/// decimales, superpuestas. Si todo queda por debajo de 1 h, se pasa a
+/// minutos para no mostrar "0,05 h".
+({double maxY, double intervalo, double factor, bool enMinutos}) _escalaEjeHoras(double maxHoras) {
+  final enMinutos = maxHoras < 1;
+  final factor = enMinutos ? 60.0 : 1.0;
+  final maximo = maxHoras * factor;
+  const marcas = 4;
+  if (maximo <= 0) return (maxY: marcas.toDouble(), intervalo: 1, factor: factor, enMinutos: enMinutos);
+  final bruto = maximo / marcas;
+  final magnitud = math.pow(10, (math.log(bruto) / math.ln10).floor()).toDouble();
+  final normalizado = bruto / magnitud;
+  final paso = (normalizado <= 1
+          ? 1
+          : normalizado <= 2
+              ? 2
+              : normalizado <= 5
+                  ? 5
+                  : 10) *
+      magnitud;
+  final maxY = (maximo / paso).ceil() * paso;
+  return (maxY: maxY, intervalo: paso, factor: factor, enMinutos: enMinutos);
+}
+
+String _formatearValorEje(double v) {
+  if ((v - v.roundToDouble()).abs() < 0.001) return v.round().toString();
+  return v.toStringAsFixed(v < 1 ? 2 : 1).replaceAll('.', ',');
+}
+
+class _Leyenda extends StatelessWidget {
+  final Color color;
+  final String texto;
+  final bool relleno;
+
+  const _Leyenda({required this.color, required this.texto, this.relleno = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: relleno ? color : color.withValues(alpha: 0.25),
+            border: relleno ? null : Border.all(color: color, width: 2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(texto, style: Theme.of(context).textTheme.bodySmall),
+      ],
     );
   }
 }

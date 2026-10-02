@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 /// Dirección gestiona aquí el curso escolar activo del centro (p.ej.
@@ -135,6 +136,9 @@ class _CursoEscolarScreenState extends State<CursoEscolarScreen> {
       body: StreamBuilder<String>(
         stream: _db.cursoEscolarActivo(),
         builder: (context, snapActivo) {
+          if (snapActivo.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapActivo.hasData) {
             return const Center(child: CircularProgressIndicator());
           }

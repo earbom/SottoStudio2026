@@ -12,6 +12,8 @@ class AjustesService extends ChangeNotifier {
   static const _claveCarpetaExportacionMarcajes = 'ajustes_carpeta_exportacion_marcajes';
   static const _claveUltimaExportacionMarcajesMes = 'ajustes_ultima_exportacion_marcajes_mes';
   static const _claveIdioma = 'ajustes_idioma';
+  static const _claveAsistenteUrl = 'ajustes_asistente_url';
+  static const _claveBienvenidaVista = 'ajustes_bienvenida_vista';
 
   static const double escalaFuenteMinima = 0.85;
   static const double escalaFuenteMaxima = 1.6;
@@ -35,13 +37,26 @@ class AjustesService extends ChangeNotifier {
   // resto de la app se ve siempre en castellano sea cual sea este
   // valor).
   Locale _idioma = const Locale('es');
+  // URL del backend propio del asistente de Claude (ver CLAUDE.md): NO
+  // es la clave de la API de Anthropic (esa vive solo en ese servidor,
+  // nunca en la app) — es el endpoint HTTP al que la app envía el
+  // mensaje del usuario y del que espera de vuelta una respuesta. '' =
+  // sin configurar, el botón del asistente avisa de que falta montar
+  // el servidor. Dirección-only, configurable desde Ajustes.
+  String _asistenteUrl = '';
+  // Tarjeta de bienvenida de Inicio ya cerrada en este dispositivo.
+  // Hasta que se cargan las preferencias se considera vista, para que
+  // la tarjeta no aparezca un instante y desaparezca.
+  bool _bienvenidaVista = true;
 
+  bool get bienvenidaVista => _bienvenidaVista;
   double get escalaFuente => _escalaFuente;
   double get escalaIconos => _escalaIconos;
   bool get confirmarCierreSesion => _confirmarCierreSesion;
   String get carpetaExportacionMarcajes => _carpetaExportacionMarcajes;
   String get ultimaExportacionMarcajesMes => _ultimaExportacionMarcajesMes;
   Locale get idioma => _idioma;
+  String get asistenteUrl => _asistenteUrl;
 
   AjustesService() {
     _cargar();
@@ -55,7 +70,23 @@ class AjustesService extends ChangeNotifier {
     _carpetaExportacionMarcajes = prefs.getString(_claveCarpetaExportacionMarcajes) ?? '';
     _ultimaExportacionMarcajesMes = prefs.getString(_claveUltimaExportacionMarcajesMes) ?? '';
     _idioma = Locale(prefs.getString(_claveIdioma) ?? 'es');
+    _asistenteUrl = prefs.getString(_claveAsistenteUrl) ?? '';
+    _bienvenidaVista = prefs.getBool(_claveBienvenidaVista) ?? false;
     notifyListeners();
+  }
+
+  Future<void> cambiarBienvenidaVista(bool vista) async {
+    _bienvenidaVista = vista;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_claveBienvenidaVista, vista);
+  }
+
+  Future<void> cambiarAsistenteUrl(String url) async {
+    _asistenteUrl = url.trim();
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_claveAsistenteUrl, _asistenteUrl);
   }
 
   Future<void> cambiarIdioma(Locale idioma) async {

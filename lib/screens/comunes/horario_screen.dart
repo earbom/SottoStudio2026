@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/asignatura.dart';
 import '../../models/matricula.dart';
 import '../../models/usuario.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 enum HorarioModo { alumno, profesor }
@@ -27,6 +28,9 @@ class HorarioScreen extends StatelessWidget {
       body: StreamBuilder<String>(
         stream: db.cursoEscolarActivo(),
         builder: (context, snapActivo) {
+          if (snapActivo.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapActivo.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -36,6 +40,9 @@ class HorarioScreen extends StatelessWidget {
                 ? db.matriculasDeAlumno(perfil.uid, cursoEscolar: cursoEscolar).first
                 : db.matriculasDeProfesor(profesorId: perfil.uid, cursoEscolar: cursoEscolar),
             builder: (context, snapMatriculas) {
+              if (snapMatriculas.hasError) {
+                return const ErrorCarga();
+              }
               if (!snapMatriculas.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -57,6 +64,9 @@ class HorarioScreen extends StatelessWidget {
                 future: Future.wait(conHorario.map((m) => m.asignaturaId).toSet().map(db.asignatura))
                     .then((r) => r.whereType<Asignatura>().toList()),
                 builder: (context, snapAsignaturas) {
+                  if (snapAsignaturas.hasError) {
+                    return const ErrorCarga();
+                  }
                   if (!snapAsignaturas.hasData) {
                     return const Center(child: CircularProgressIndicator());
                   }
@@ -67,6 +77,9 @@ class HorarioScreen extends StatelessWidget {
                       : FutureBuilder<List<Usuario>>(
                           future: db.alumnosDelCentro().first,
                           builder: (context, snapAlumnos) {
+                            if (snapAlumnos.hasError) {
+                              return const ErrorCarga();
+                            }
                             if (!snapAlumnos.hasData) {
                               return const Center(child: CircularProgressIndicator());
                             }

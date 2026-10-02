@@ -47,6 +47,12 @@ class Usuario {
   // toda cuenta creada antes de este campo tenía cuenta real. Ver
   // CLAUDE.md.
   final bool tieneCuenta;
+  // false = dado de baja del centro por dirección (alumno que se va,
+  // profesor que deja de trabajar aquí). No se borra el documento —
+  // sus notas, asistencias, horas y fichajes se conservan — pero
+  // desaparece de los listados y firestore.rules le retira cualquier
+  // permiso (`tienePermiso` exige activo != false). Default true.
+  final bool activo;
 
   Usuario({
     required this.uid,
@@ -58,6 +64,7 @@ class Usuario {
     this.centroId,
     required this.createdAt,
     this.tieneCuenta = true,
+    this.activo = true,
   });
 
   bool tienePermiso(Permiso p) => permisos.contains(p);
@@ -82,6 +89,7 @@ class Usuario {
         centroId: centroId,
         createdAt: createdAt,
         tieneCuenta: tieneCuenta,
+        activo: activo,
       );
 
   // Igualdad por uid (no por identidad de objeto): imprescindible para
@@ -111,6 +119,7 @@ class Usuario {
           : DateTime.tryParse(data['createdAt']?.toString() ?? '') ??
               DateTime.now(),
       tieneCuenta: data['tieneCuenta'] ?? true,
+      activo: data['activo'] ?? true,
     );
   }
 
@@ -124,6 +133,7 @@ class Usuario {
       'centroId': centroId,
       'createdAt': createdAt.toIso8601String(),
       'tieneCuenta': tieneCuenta,
+      'activo': activo,
     };
   }
 }

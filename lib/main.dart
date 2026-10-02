@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'l10n/app_localizations.dart';
 
@@ -22,6 +23,8 @@ final _profundidadNavegacion = ValueNotifier<int>(0);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Nombres de meses/días en español y catalán (calendarios, fechas).
+  await initializeDateFormatting();
   runApp(
     MultiProvider(
       providers: [
@@ -123,6 +126,7 @@ class _RaizAutenticacion extends StatelessWidget {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
             final real = snapshotPerfil.data!;
+            if (!real.activo) return const _CuentaDadaDeBaja();
             // Modo desarrollador (ver CLAUDE.md): si la cuenta REAL
             // tiene el permiso `desarrollador` y hay una vista
             // simulada elegida, se construye una copia de `perfil` con
@@ -156,6 +160,41 @@ class _RaizAutenticacion extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// Pantalla para una cuenta que dirección ha dado de baja del centro
+/// (`Usuario.activo == false`): no entra a la app; las reglas de
+/// Firestore ya le retiran cualquier permiso igualmente.
+class _CuentaDadaDeBaja extends StatelessWidget {
+  const _CuentaDadaDeBaja();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.person_off_outlined, size: 56),
+              const SizedBox(height: 16),
+              const Text(
+                'Esta cuenta está dada de baja del centro.\nSi crees que es un error, habla con dirección.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () => AuthService().cerrarSesion(),
+                child: const Text('Volver al inicio de sesión'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

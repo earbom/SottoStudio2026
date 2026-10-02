@@ -5,6 +5,8 @@ import '../../models/matricula.dart';
 import '../../models/nota.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../utils/validacion_nota.dart';
+import '../../widgets/error_carga.dart';
 import 'alumno_en_asignatura_screen.dart';
 
 /// Cuadrícula de notas de una asignatura: filas = alumnos
@@ -35,8 +37,8 @@ class NotasAsignaturaGridScreen extends StatelessWidget {
         actions: [
           if (perfil.esProfesor || perfil.esDireccion)
             IconButton(
-              icon: const Icon(Icons.timer_outlined),
-              tooltip: 'Retraso de visibilidad para el alumno',
+              icon: const Icon(Icons.visibility_outlined),
+              tooltip: 'Cuándo ve el alumno sus notas',
               onPressed: () => _configurarRetraso(context),
             ),
         ],
@@ -77,17 +79,22 @@ class NotasAsignaturaGridScreen extends StatelessWidget {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Guardar')),
         ],
       ),
     );
     if (guardar != true) return;
     final dias = int.tryParse(ctrl.text.trim()) ?? 0;
-    await DbService().actualizarAsignatura(asignatura.id!, {'diasRetrasoVisibilidadNotas': dias});
+    await DbService().actualizarAsignatura(
+        asignatura.id!, {'diasRetrasoVisibilidadNotas': dias});
     if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Retraso de visibilidad guardado.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Retraso de visibilidad guardado.')));
     }
   }
 }
@@ -114,69 +121,83 @@ class CuerpoNotasAsignatura extends StatelessWidget {
   Widget build(BuildContext context) {
     final db = DbService();
     return StreamBuilder<List<CriterioEvaluacion>>(
-        stream: db.criteriosDeAsignatura(asignatura.id!),
-        builder: (context, snapCriterios) {
-          if (!snapCriterios.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final criterios = snapCriterios.data!;
-          if (criterios.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                    'Dirección aún no ha definido criterios de evaluación para esta asignatura.'),
-              ),
-            );
-          }
-          return StreamBuilder<List<Matricula>>(
-            stream: db.matriculasDeAsignatura(asignatura.id!, cursoEscolar: cursoEscolar),
-            builder: (context, snapMatriculas) {
-              if (!snapMatriculas.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              // Mismo criterio de alcance que _FilaMatricula en
-              // asignatura_detalle_screen.dart: con el permiso cruzado
-              // entre cursos (ver CLAUDE.md), cualquier profesor de esta
-              // asignatura ve a TODOS los matriculados, no solo a los que
-              // matriculas.profesorId le fija (informativo desde ahora).
-              final matriculas = snapMatriculas.data!;
-              if (matriculas.isEmpty) {
-                return const Center(
-                  child: Text('Aún no hay alumnos matriculados.'),
-                );
-              }
-              return FutureBuilder<List<Usuario?>>(
-                future: Future.wait(matriculas.map((m) => db.obtenerUsuario(m.alumnoId))),
-                builder: (context, snapAlumnos) {
-                  if (!snapAlumnos.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final alumnos = snapAlumnos.data!.whereType<Usuario>().toList()
-                    ..sort((a, b) => a.nombre.compareTo(b.nombre));
-                  return StreamBuilder<List<Nota>>(
-                    stream: db.notasDeAsignatura(asignatura.id!),
-                    builder: (context, snapNotas) {
-                      if (!snapNotas.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      return _Cuadricula(
-                        db: db,
-                        asignatura: asignatura,
-                        perfil: perfil,
-                        cursoEscolar: cursoEscolar,
-                        alumnos: alumnos,
-                        criterios: criterios,
-                        notas: snapNotas.data!,
-                        puedeGestionar: perfil.esProfesor || perfil.esDireccion,
-                      );
-                    },
-                  );
-                },
-              );
-            },
+      stream: db.criteriosDeAsignatura(asignatura.id!),
+      builder: (context, snapCriterios) {
+        if (snapCriterios.hasError) {
+          return const ErrorCarga();
+        }
+        if (!snapCriterios.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final criterios = snapCriterios.data!;
+        if (criterios.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                  'Dirección aún no ha definido criterios de evaluación para esta asignatura.'),
+            ),
           );
-        },
+        }
+        return StreamBuilder<List<Matricula>>(
+          stream: db.matriculasDeAsignatura(asignatura.id!,
+              cursoEscolar: cursoEscolar),
+          builder: (context, snapMatriculas) {
+            if (snapMatriculas.hasError) {
+              return const ErrorCarga();
+            }
+            if (!snapMatriculas.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            // Mismo criterio de alcance que _FilaMatricula en
+            // asignatura_detalle_screen.dart: con el permiso cruzado
+            // entre cursos (ver CLAUDE.md), cualquier profesor de esta
+            // asignatura ve a TODOS los matriculados, no solo a los que
+            // matriculas.profesorId le fija (informativo desde ahora).
+            final matriculas = snapMatriculas.data!;
+            if (matriculas.isEmpty) {
+              return const Center(
+                child: Text('Aún no hay alumnos matriculados.'),
+              );
+            }
+            return FutureBuilder<List<Usuario?>>(
+              future: Future.wait(
+                  matriculas.map((m) => db.obtenerUsuario(m.alumnoId))),
+              builder: (context, snapAlumnos) {
+                if (snapAlumnos.hasError) {
+                  return const ErrorCarga();
+                }
+                if (!snapAlumnos.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final alumnos = snapAlumnos.data!.whereType<Usuario>().toList()
+                  ..sort((a, b) => a.nombre.compareTo(b.nombre));
+                return StreamBuilder<List<Nota>>(
+                  stream: db.notasDeAsignatura(asignatura.id!),
+                  builder: (context, snapNotas) {
+                    if (snapNotas.hasError) {
+                      return const ErrorCarga();
+                    }
+                    if (!snapNotas.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    return _Cuadricula(
+                      db: db,
+                      asignatura: asignatura,
+                      perfil: perfil,
+                      cursoEscolar: cursoEscolar,
+                      alumnos: alumnos,
+                      criterios: criterios,
+                      notas: snapNotas.data!,
+                      puedeGestionar: perfil.esProfesor || perfil.esDireccion,
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -202,7 +223,8 @@ class _Cuadricula extends StatelessWidget {
     required this.puedeGestionar,
   });
 
-  Future<void> _tocarCelda(BuildContext context, Usuario alumno, CriterioEvaluacion criterio) async {
+  Future<void> _tocarCelda(
+      BuildContext context, Usuario alumno, CriterioEvaluacion criterio) async {
     final delAlumnoYCriterio = notas
         .where((n) => n.alumnoId == alumno.uid && n.criterioId == criterio.id)
         .toList()
@@ -269,43 +291,73 @@ class _Cuadricula extends StatelessWidget {
 
     final valorCtrl = TextEditingController();
     final comentarioCtrl = TextEditingController();
-    final crear = await showDialog<bool>(
+    String? error;
+    final valor = await showDialog<double>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${alumno.nombre} · ${criterio.nombre} (${criterio.peso.toStringAsFixed(0)}%)'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: valorCtrl,
-              decoration: const InputDecoration(labelText: 'Valor (0-10)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              autofocus: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          void guardar() {
+            final v = parsearValorNota(valorCtrl.text);
+            if (v == null) {
+              setStateDialog(() => error = mensajeErrorValorNota);
+              return;
+            }
+            Navigator.pop(context, v);
+          }
+
+          return AlertDialog(
+            title: Text(
+                '${alumno.nombre} · ${criterio.nombre} (${criterio.peso.toStringAsFixed(0)}%)'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: valorCtrl,
+                  decoration: InputDecoration(
+                      labelText: 'Nota (0-10)', errorText: error),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                  onSubmitted: (_) => guardar(),
+                ),
+                TextField(
+                  controller: comentarioCtrl,
+                  decoration:
+                      const InputDecoration(labelText: 'Comentario (opcional)'),
+                ),
+              ],
             ),
-            TextField(
-              controller: comentarioCtrl,
-              decoration: const InputDecoration(labelText: 'Comentario (opcional)'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
-        ],
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar')),
+              FilledButton(onPressed: guardar, child: const Text('Guardar')),
+            ],
+          );
+        },
       ),
     );
-    if (crear != true) return;
+    if (valor == null || !context.mounted) return;
 
-    final valor = double.tryParse(valorCtrl.text.replaceAll(',', '.')) ?? 0;
-    await db.crearNota(Nota(
-      alumnoId: alumno.uid,
-      profesorId: perfil.uid,
-      asignaturaId: asignatura.id!,
-      criterioId: criterio.id!,
-      valor: valor,
-      comentario: comentarioCtrl.text.trim(),
-      fecha: DateTime.now(),
-    ));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await db.crearNota(Nota(
+        alumnoId: alumno.uid,
+        profesorId: perfil.uid,
+        asignaturaId: asignatura.id!,
+        criterioId: criterio.id!,
+        valor: valor,
+        comentario: comentarioCtrl.text.trim(),
+        fecha: DateTime.now(),
+      ));
+      messenger.showSnackBar(SnackBar(
+          content: Text(
+              'Nota guardada: ${alumno.nombre} · ${valor.toStringAsFixed(1)}')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text(
+              'No se pudo guardar la nota. Comprueba la conexión o que tengas permiso en esta asignatura.')));
+    }
   }
 
   @override
@@ -321,35 +373,73 @@ class _Cuadricula extends StatelessWidget {
     }
 
     return SingleChildScrollView(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          columns: [
-            const DataColumn(label: Text('Alumno')),
-            for (final criterio in criterios)
-              DataColumn(label: Text('${criterio.nombre}\n${criterio.peso.toStringAsFixed(0)}%')),
-          ],
-          rows: [
-            for (final alumno in alumnos)
-              DataRow(cells: [
-                DataCell(Text(alumno.nombre)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (puedeGestionar)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Text(
+                  'Toca una casilla para poner una nota. «—» = todavía sin nota.',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columns: [
+                const DataColumn(label: Text('Alumno')),
                 for (final criterio in criterios)
-                  DataCell(
-                    Builder(builder: (context) {
-                      final nota = ultimaNotaPorCelda['${alumno.uid}_${criterio.id}'];
-                      return Text(
-                        nota == null ? '—' : nota.valor.toStringAsFixed(1),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: nota == null ? Colors.grey : null,
+                  DataColumn(
+                      label: Text(
+                          '${criterio.nombre}\n${criterio.peso.toStringAsFixed(0)}%')),
+              ],
+              rows: [
+                for (final alumno in alumnos)
+                  DataRow(cells: [
+                    DataCell(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(alumno.nombre),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.chevron_right, size: 16),
+                        ],
+                      ),
+                      // Abre la ficha del alumno en la pestaña Notas:
+                      // ahí se ven todas sus notas y se corrigen/borran.
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AlumnoEnAsignaturaScreen(
+                            alumno: alumno,
+                            asignatura: asignatura,
+                            perfil: perfil,
+                            cursoEscolar: cursoEscolar,
+                            pestanaInicial: 2,
+                          ),
                         ),
-                      );
-                    }),
-                    onTap: () => _tocarCelda(context, alumno, criterio),
-                  ),
-              ]),
-          ],
-        ),
+                      ),
+                    ),
+                    for (final criterio in criterios)
+                      DataCell(
+                        Builder(builder: (context) {
+                          final nota = ultimaNotaPorCelda[
+                              '${alumno.uid}_${criterio.id}'];
+                          return Text(
+                            nota == null ? '—' : nota.valor.toStringAsFixed(1),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: nota == null ? Colors.grey : null,
+                            ),
+                          );
+                        }),
+                        onTap: () => _tocarCelda(context, alumno, criterio),
+                      ),
+                  ]),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

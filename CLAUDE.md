@@ -268,8 +268,10 @@ dirección — un almacén local en el centro no sirve.
     principio; hay tests de regresión en `firestore-tests/rules.test.js`
     ("leer un documento que aún no existe no debe fallar").
 
-17. **Horas objetivo son MENSUALES, por CURSO, no por asignatura ni por
-    alumno.** `Curso.horasObjetivoMensual` (0 = sin objetivo, no se
+17. **(HISTÓRICO — objetivo movido a `Asignatura` en el punto 72, no
+    reintroducir `Curso.horasObjetivoMensual`.) Horas objetivo eran
+    MENSUALES, por CURSO, no por asignatura ni por alumno.**
+    `Curso.horasObjetivoMensual` (0 = sin objetivo, no se
     colorea nada) se fija al crear/editar el curso
     (`cursos_screen.dart`) — YA NO vive en `Asignatura` (se movió
     aquí; ver punto 29 sobre la jerarquía de cursos). Como
@@ -1697,14 +1699,405 @@ dirección — un almacén local en el centro no sirve.
     `firestore-tests/rules.test.js`, describe `'sesionesEstudio:
     sesión sintética generada al marcar asistencia'`.
 
+69. **Franjas horarias de GRUPO configurables desde la propia
+    asignatura, varias por asignatura.** (Feedback tras probar el
+    punto 67, en dos rondas: primero solo se pudo definir UNA franja
+    por asignatura; la propia dirección hizo notar que una misma
+    asignatura teórica puede impartirse en varios grupos a días/horas
+    distintos —p. ej. "Lenguaje musical" L/X 17:00-18:00 para un grupo
+    y M/J 18:00-19:00 para otro— así que se generalizó a una LISTA.
+    Instrumento sigue sin cambios: cada alumno con su propio horario
+    por matrícula.)
+    - Nueva clase `FranjaHoraria` (`lib/models/asignatura.dart`): `id`
+      (generado en cliente al crearla, estable), `diasSemana`,
+      `horaInicio`, `horaFin`. `Asignatura.franjasHorario` (lista,
+      vacía = sin franjas de grupo, rige el horario por alumno de
+      siempre — caso normal para instrumento).
+    - Se edita desde `CursoDetalleScreen._mostrarFormularioAsignatura`,
+      en una sección que solo aparece cuando "Permite grabar estudio"
+      está DESACTIVADO (instrumento y franjas de grupo son mutuamente
+      excluyentes por diseño: activar el switch limpia la lista al
+      guardar). La sección lista las franjas ya creadas (con
+      editar/borrar) más un botón "Añadir franja horaria" que abre
+      `_mostrarFormularioFranja`, un sub-diálogo con los mismos chips
+      de días + `showTimePicker` que ya se usaban para una sola franja.
+    - `Matricula.franjaHorarioId` ('' = ninguna) referencia a qué
+      franja pertenece ESE alumno — `diasSemana`/`horaInicio`/`horaFin`
+      de la matrícula (ver punto 67) se copian de la franja elegida al
+      seleccionarla (`DbService.asignarFranjaMatricula`), para que el
+      horario general/de alumno/profesor sigan leyendo siempre de
+      `Matricula` sin distinguir casos. En `_configurarMatricula`
+      (`asignatura_detalle_screen.dart`), cuando la asignatura tiene
+      franjas, el diálogo deja de pedir días/hora sueltos y en su lugar
+      ofrece un desplegable para ELEGIR una franja.
+    - Editar o borrar una franja desde `CursoDetalleScreen` re-sincroniza
+      las matrículas que ya la tenían asignada
+      (`DbService.sincronizarFranjaHoraria` si se editó,
+      `limpiarFranjaDeMatriculas` si se borró — esta última deja a esos
+      alumnos sin horario hasta que dirección les asigne otra franja),
+      comparando por `id` las franjas antes/después de guardar — así
+      cambiarla más adelante también actualiza a los alumnos ya
+      matriculados en ese grupo, no solo a los nuevos.
+    - **Bug real detectado al probar** (reportado como "edito una
+      franja y no veo el cambio en el horario general"): crear/editar
+      una franja en una asignatura que YA tenía alumnos matriculados de
+      antes no los vincula solos a esa franja —`franjaHorarioId` sigue
+      vacío en sus matrículas—, así que la sincronización no tiene
+      nada que actualizar y el horario general se queda sin esas
+      clases. Solución: icono nuevo "Asignar franja horaria en bloque"
+      en el `AppBar` de `AsignaturaDetalleScreen` (dirección, solo
+      visible si la asignatura tiene alguna franja), que abre un
+      diálogo con un desplegable de franja + checklist de los alumnos
+      ya matriculados (todos marcados por defecto) y aplica
+      `DbService.asignarFranjaAMatriculas` (nuevo, un solo
+      `WriteBatch`) a los seleccionados de golpe — evita tener que
+      editar matrícula por matrícula, que es justo lo que las franjas
+      de grupo querían evitar.
+    - Sin cambios de `firestore.rules` (ni `asignaturas` ni
+      `matriculas` tenían allowlist de campos).
+
+70. **Arrastrar y soltar en el Horario general.** Pedido explícitamente
+    ("sería un cambio estupendo") tras evaluar alternativas: no hay
+    ningún paquete libre maduro de calendario/horario con
+    arrastrar-soltar para Flutter (los que están bien pulidos, como
+    Syncfusion, son de pago/freemium) y de todos modos habría que
+    programar a mano la lógica de este dominio (franjas, alumnos,
+    profesores) porque ninguno la modela de fábrica — se construyó con
+    `LongPressDraggable`/`DragTarget`, widgets nativos del SDK de
+    Flutter, sin depender de nada externo.
+    - `_TablaHorario` (`horario_general_screen.dart`) pasó de mostrar
+      solo las horas que ya tenían clase a una rejilla de franjas de
+      MEDIA HORA fijas (con un margen de una hora antes/después del
+      rango real, `_franjasDeLaRejilla`) — necesario para tener huecos
+      libres donde soltar, no solo casillas ya ocupadas.
+    - Cada clase es un `LongPressDraggable` (pulsación larga para no
+      chocar con el tap normal, que sigue abriendo la ficha de
+      siempre); cada casilla (día × hora) es un `DragTarget` que
+      acepta soltar ahí una clase, con resaltado visual mientras se
+      arrastra encima.
+    - `DbService.moverOcurrenciaHorario` (nuevo): cambia el día
+      arrastrado por el de destino en `Matricula.diasSemana`
+      (conservando el resto de días si el alumno tenía varios) y
+      actualiza `horaInicio`/`horaFin` a los del destino, calculando la
+      hora de fin para mantener la MISMA duración que tenía. Desvincula
+      la matrícula de cualquier franja de grupo que tuviera
+      (`franjaHorarioId` = ''), porque su horario ya puede no coincidir
+      con el resto del grupo tras moverla a mano.
+    - **MVP deliberado sin detección de conflictos**: soltar una clase
+      sobre una casilla ya ocupada por otra simplemente añade una
+      segunda ahí, sin avisar de un choque de horario ni de que un
+      profesor/aula quede doblemente ocupado. Añadir/quitar un alumno
+      entero de una asignatura sigue yendo por el enlace a
+      `AsignaturaDetalleScreen` de siempre — arrastrar solo reubica una
+      clase que YA existe.
+    - Sin cambios de `firestore.rules` (mismo camino de escritura de
+      `matriculas`, dirección-only, que ya existía).
+
+71. **Botón del asistente de Claude — UI y transporte "dejados
+    preparados", SIN backend todavía.** Dirección planea montar un
+    servidor propio (una Orange Pi, decidido explícitamente para no
+    depender del plan Blaze de Firebase, ver puntos 5/6/13) que
+    guarde la clave de la API de Claude y traduzca comandos en
+    lenguaje natural ("cambia a María de las 19:00 a las 20:00") en
+    acciones. Lo construido aquí es SOLO el lado de la app —
+    intencionadamente, la clave de la API de Anthropic NUNCA vive en
+    el cliente, y hoy no existe ningún servidor real que ejecutar
+    acciones contra Firestore.
+    - `BotonAsistente` (`lib/widgets/asistente_chat.dart`): FAB fijo
+      superpuesto en un `Stack` por encima de TODO el `Scaffold` de
+      `HomeShell` (incluido el FAB propio de la pantalla activa, si
+      tiene uno — por eso `HomeShell.build()` se dividió en un método
+      `_cuerpoConAppBar` + el `Stack` que lo envuelve), esquina
+      inferior derecha pero desplazado a `bottom: 88` para no
+      solaparse con esos FABs. Solo `perfil.esDireccion` — son quienes
+      efectúan gestiones del centro.
+    - Al tocarlo se abre un `DraggableScrollableSheet` con una interfaz
+      de chat clásica (burbujas usuario/asistente, campo de texto,
+      historial solo en memoria — se pierde al cerrar el panel, no se
+      guarda en ningún sitio).
+    - `AsistenteService` (`lib/services/asistente_service.dart`): hace
+      `POST` a la URL configurada por dirección en Ajustes
+      (`AjustesService.asistenteUrl`, nuevo, persistido con
+      `shared_preferences` como el resto de Ajustes) con
+      `{mensaje, historial}` y espera `{respuesta: "..."}` — un
+      contrato deliberadamente simple, a falta de diseñar el backend
+      real. **No ejecuta ninguna acción contra `DbService` todavía** —
+      hoy solo muestra el texto que devuelva el servidor. Diseñar el
+      mapeo de acciones (qué herramientas expone Claude, cómo resolver
+      "María" a un `alumnoId`, confirmación antes de ejecutar) es
+      trabajo futuro, a la vez que se construya ese servidor.
+    - Nueva dependencia `http` (paquete oficial de dart.dev): necesaria
+      porque `dart:io.HttpClient` no funciona en Flutter web, y la app
+      corre en web — sin alternativa viable sin dependencia.
+    - **Nota para quien monte el servidor**: en la versión web de la
+      app, el navegador exige que ESE servidor responda con cabeceras
+      CORS (`Access-Control-Allow-Origin`) para el origen de Sotto
+      Studio, o la petición fallará solo en web (no en Android/macOS).
+    - Sin cambios de `firestore.rules` (esta tanda no toca Firestore en
+      absoluto).
+
+72. **Objetivo de horas: SOLO por asignatura (se quita el del curso) +
+    plus de orquesta en MINUTOS + desambiguación por curso en el
+    desplegable.** Tres bugs reportados juntos tras probar el punto 66
+    (plus de orquesta) y 52 (objetivo por asignatura).
+    - **`Curso.horasObjetivoMensual` eliminado por completo** (campo,
+      formulario de `CursosScreen`, validación en `firestore.rules`).
+    Antes coexistían dos objetivos (curso y asignatura, ver punto 52)
+    y confundía cuál mandaba; dirección decidió una única fuente:
+    `Asignatura.horasObjetivoMensual`, porque cada asignatura tiene su
+    propia cantidad de horas (p. ej. una orquesta de guitarras no
+    aporta las mismas horas que "suma" a una asignatura que otra). El
+    informe de dirección y el ranking global, que antes resolvían el
+    objetivo vía `Curso` (agregado por curso, deduplicado), ahora
+    agregan directamente `Asignatura.horasObjetivoMensual` por cada
+    `asignaturaId` distinto entre las matrículas activas del alumno —
+    `DbService.informeDireccion()` ya no consulta `cursos` para esto.
+    El resto de vistas (ranking por asignatura, vista global, rosco
+    semanal, cuadro de honor) ya usaban el objetivo de la propia
+    asignatura desde el punto 52 y no necesitaron cambios.
+    - **`PlusOrquesta.minutosSemana`** (antes `horasSemana`, un
+      `double`): el tiempo que aporta un plus suele ser más corto que
+      una hora completa (15-20 min de ensayo), así que se introduce en
+      minutos (entero) en vez de forzar fracciones de hora imprecisas.
+      Todo punto que antes multiplicaba por `horasSemana` para
+      aproximar horas/mes (`× 4`, mismo criterio que el objetivo anual
+      = mensual × 12 del punto 17) ahora convierte explícitamente
+      `minutosSemana × 4 / 60` —
+      `HorasAsignaturaScreen`/`VistaGlobalAsignaturaScreen`. La
+      agregación semanal exacta de `MedallasRoscosScreen` pasa por
+      `DbService.horasPlusOrquestaSemanalDeAlumno()`, que mantiene su
+      nombre/contrato (devuelve HORAS, `double`) pero convierte
+      internamente (`minutosSemana / 60.0`) — esa pantalla no necesitó
+      ningún cambio. `firestore.rules`
+      (`plusesOrquesta.horasSemana >= 0` →
+      `plusesOrquesta.minutosSemana >= 0`) y los tests de
+      `firestore-tests/rules.test.js` actualizados igual.
+    - **Desambiguación por curso en `PlusesOrquestaScreen`**: el
+      desplegable de "asignatura a la que suma minutos" mostraba solo
+      `Asignatura.nombre` — con varias asignaturas del mismo nombre en
+      cursos distintos (p. ej. 4 "Armonía", una por curso) era
+      imposible saber a cuál se estaba apuntando. Ahora resuelve
+      también `cursos()` y muestra `"{nombre} · {curso.nombre}"` tanto
+      en el desplegable como en el listado de pluses ya creados.
+
+73. **Auditoría de usabilidad (octubre 2026): los 6 fallos críticos.**
+    Dirección (dos personas de ~50 años, poco técnicas) decide si el
+    centro implanta la app, así que se revisó la app tarea por tarea
+    con su perfil, el de profesor y el de alumno. Se arreglaron primero
+    los fallos que impedían completar una tarea o perdían datos:
+    - **Dar de baja a un alumno de una asignatura**: `desmatricular()`
+      existía en `DbService` pero ninguna pantalla lo usaba. Ahora cada
+      fila de `AsignaturaDetalleScreen` (dirección) tiene un menú con
+      texto: "Cambiar horario, grupo o profesor" / "Dar de baja de esta
+      asignatura" (con confirmación; notas/asistencias/horas se
+      conservan).
+    - **Editar datos, restablecer contraseña y dar de baja del centro**
+      a alumnos y profesores (`lib/widgets/acciones_usuario.dart`, menú
+      ⋮ en `AlumnoPerfilScreen` y `ProfesorAsignaturasScreen`). El email
+      de acceso NO se puede cambiar desde la app (Firebase Auth solo lo
+      permite para otra cuenta con Admin SDK = Cloud Functions/Blaze);
+      se explica en el propio diálogo. "Restablecer contraseña" envía el
+      email estándar de Firebase (`sendPasswordResetEmail`).
+      **Baja del centro = `usuarios.activo: false` + `bajaEn`**, nunca
+      se borra el documento (mismo principio que `marcajes`): se
+      desactivan todas sus matrículas activas, desaparece de los
+      listados (`alumnosDelCentro`/`profesoresDelCentro` filtran en
+      cliente, no con `where`, porque los documentos antiguos no tienen
+      el campo), `main.dart` le muestra "cuenta dada de baja" en vez de
+      entrar, y **`firestore.rules` le retira todo permiso de rol**
+      (`tienePermiso` exige `activo != false`). El propio usuario no
+      puede cambiar su `activo`. Sección plegable "Dados de baja (N)"
+      con botón "Reactivar" al final de Alumnos y Profesorado; reactivar
+      NO recupera las matrículas.
+    - **El profesor sustituto no llegaba a la asignatura que cubría** si
+      no daba ya una del mismo nombre: no aparecía en "Mis asignaturas"
+      y, aunque hubiera llegado, las reglas no le dejaban leer la lista
+      de alumnos ni la asistencia ya marcada. Ahora
+      `DbService.asignaturasVisiblesParaProfesor()` añade las
+      asignaturas con sustitución HOY, y `firestore.rules` permite al
+      sustituto leer `matriculas` (`tieneSustitucion(asignaturaId,
+      hoy())`, nueva función `hoy()` en UTC — entre las 00:00 y las
+      01:00/02:00 peninsulares aún cuenta como el día anterior) y
+      `asistencias` de ese día. Solo HOY, no días futuros.
+    - **Notas**: un campo vacío guardaba un 0, y un valor fuera de 0-10
+      fallaba sin avisar (las reglas lo rechazan y la excepción no se
+      capturaba). `lib/utils/validacion_nota.dart` valida en ambos
+      diálogos (cuadrícula y detalle del alumno), con mensaje de error
+      en el campo, y el guardado muestra éxito o un error legible.
+    - **Grabación de estudio** (`GrabadorEstudioWidget`): salir de la
+      pantalla grabando perdía la sesión sin avisar. Ahora el botón atrás
+      pide confirmación (`PopScope`) y, si la pantalla se cierra por
+      otra vía (el botón flotante de volver al menú hace `popUntil` y se
+      salta `PopScope`), `dispose` detiene y guarda igualmente. Además:
+      mensaje "¡Sesión guardada! Has tocado X min", aviso claro si no
+      hay permiso de micrófono, botón grande con color (antes gris, con
+      aspecto de desactivado), instrucciones, y "Efectivo"/"Total"
+      renombrados a "Tocando"/"Tiempo total" para niños (ARB es/ca).
+    - **Objetivo de horas en el formulario de la asignatura** (pedido
+      expreso, ver punto 72): el formulario de crear/editar asignatura
+      se extrajo a `lib/screens/direccion/formulario_asignatura.dart`
+      (`crearAsignaturaEnCurso`/`editarAsignatura`) e incluye "Horas
+      por semana"/"Horas por mes"; se retiró de
+      `CriteriosEvaluacionScreen` (un solo sitio). Dirección puede ahora
+      **editar la asignatura desde su propia ficha**: las acciones de
+      dirección de `AsignaturaDetalleScreen` pasaron de iconos sueltos a
+      un menú ⋮ con texto (Editar asignatura / Criterios de evaluación /
+      Sustituciones / Asignar grupo a varios alumnos). En el formulario,
+      "Permite grabar estudio" pasa a llamarse "Es una asignatura de
+      instrumento" y "franjas horarias" pasa a "grupos y horario de
+      clase" (lenguaje de dirección, no técnico); quitar un grupo pide
+      confirmación.
+    - De paso: mensajes de éxito al matricular/editar matrícula/crear o
+      editar asignatura, errores sin texto técnico (`$e`), y la lista
+      del diálogo de matricular ordenada por apellidos.
+    - Tests de regresión en `firestore-tests/rules.test.js`, describes
+      `'bajas del centro (usuarios.activo == false)'` y
+      `'sustituto de otra asignatura: lista de alumnos y asistencia del
+      día'`.
+    - El resto de la auditoría se hizo en el punto 74.
+
+74. **Auditoría de usabilidad, segunda tanda (octubre 2026)**, más un
+    arreglo de la gráfica de estadísticas.
+    - **Gráfica "horas de estudio por semana"** (`_TabEstadisticas`,
+      `alumno_en_asignatura_screen.dart`): el eje Y lo calculaba
+      fl_chart solo y, con valores pequeños, generaba muchas etiquetas
+      con decimales superpuestas. `_escalaEjeHoras()` fija siempre 3-4
+      marcas "redondas" (múltiplos de 1, 2 o 5 × 10^n) a partir del
+      máximo, y pasa a MINUTOS si todo queda por debajo de 1 h. El
+      tooltip de cada barra muestra el valor exacto con su unidad.
+    - **Inicio como centro de avisos** (`lib/widgets/panel_inicio.dart`):
+      dirección ve "notas finales por validar", "clases sin pasar lista
+      (7 días)" y "fichajes olvidados por validar", con un toque para ir
+      a cada sección (`InicioScreen.irA` → `HomeShell._abrirSeccion`,
+      así la sección se abre con su barra de título igual que desde el
+      menú). Profesor ve **"Mis clases de hoy"**: los alumnos con clase
+      hoy según `Matricula.diasSemana` (incluidas las asignaturas que
+      cubre hoy como sustituto), ordenados por hora, con los botones de
+      asistencia a la vista. Nueva entrada "Inicio" en el menú (antes no
+      había forma de volver a Inicio sin reiniciar la app).
+    - **Menú de dirección más corto**: lo de uso ocasional (Gestionar
+      cursos, Registro horario, Curso escolar, Pluses de orquesta,
+      Importar) va plegado en "Configuración del centro"
+      (`ExpansionTile`).
+    - **Una sola fuente de cálculo** para los avisos y sus pantallas:
+      `DbService.notasFinalesPorValidar()` (lo usan Inicio y
+      `NotasPendientesScreen`, que además muestra ahora la nota de cada
+      criterio y cuántos alumnos quedan fuera por tener criterios sin
+      nota) y `DbService.asistenciasSinMarcar()` (una consulta por rango
+      de fecha en vez de una lectura por alumno·asignatura·día; la
+      pantalla muestra también el profesor responsable).
+    - **Botones de asistencia** (`FilaAsistenciaHoy`, ahora pública en
+      `asistencias_asignatura_screen.dart`): con texto
+      ("Asistió/Retraso/Faltó", no solo color — accesibilidad para
+      daltónicos), 40 px de alto y mensaje si falla al guardar.
+    - **Buscadores** (`lib/widgets/campo_busqueda.dart`, sin distinguir
+      mayúsculas ni acentos) en Alumnos y en el diálogo de matricular.
+    - "Nueva asignatura" directamente desde "Asignaturas" (pide primero
+      el curso), además de desde Gestionar cursos.
+    - Calendarios (`TableCalendar`) en el idioma de la app y empezando
+      en lunes (`initializeDateFormatting()` en `main.dart`); fechas
+      dd/mm/aaaa en Registro horario, Mis fichajes y Sustituciones;
+      confirmación con la hora antes de fichar (el fichaje no se puede
+      editar); confirmación al anular una sustitución; sin doble barra
+      de título en Horario general; botón del asistente oculto mientras
+      no haya URL configurada en Ajustes; "Recalcular grupos de
+      asignatura" (migración de un solo uso) solo en modo desarrollador;
+      textos de matrícula sin jerga ("Profesor habitual", "Grupo de
+      clase").
+    - **Validar nota final**: dirección decidió un único botón
+      "Validar nota final" en `NotasPendientesScreen` (antes
+      "supervisada"/"corregida" sin diferencia real). Se guarda como
+      `EstadoNota.supervisada`; `corregida` queda solo por
+      compatibilidad con notas antiguas. En pantalla el estado se
+      muestra como "Pendiente de validar"/"Validada por dirección"
+      (`EstadoNota.etiqueta`), nunca el nombre técnico del enum.
+    - "Alumnos" va dentro de "Gestión del centro" en el menú de
+      dirección (antes quedaba suelto encima).
+    - **Selector de idioma: se mantiene visible a propósito** — antes de
+      desplegar la versión final se traducirá TODO lo que falte (y a
+      más idiomas); ver punto 34.
+
+75. **Auditoría de usabilidad, tercera tanda (octubre 2026).**
+    - **Matricular desde la ficha del alumno** (`AlumnoPerfilScreen`,
+      botón "Matricular en una asignatura" con buscador de asignatura +
+      curso): dirección piensa "por alumno". La lógica de configurar y
+      guardar la matrícula es una sola, `configurarYMatricular()` en
+      `asignatura_detalle_screen.dart`, usada desde ambos lados. La
+      ficha lista sus asignaturas con curso, días y hora, y abre la
+      ficha de cada una. Al crear un alumno, `CrearAlumnoScreen` ofrece
+      "Matricular ahora" y lleva a su ficha (necesita `perfil`).
+    - **Pasar lista** (`CuerpoAsistenciasAsignatura`): por defecto solo
+      los alumnos con clase HOY según `Matricula.diasSemana`, con
+      interruptor "Ver también a los que no tienen clase hoy".
+    - **Corregir/borrar una nota mal puesta** (`_TabNotas`, icono de
+      lápiz en cada nota; también se ve la fecha de la nota):
+      dirección siempre; el profesor que la puso, mientras siga
+      pendiente de validar. `firestore.rules` (`notas`): el autor puede
+      borrar su nota pendiente, y al corregirla solo puede cambiar
+      valor/comentario (no alumno, asignatura, criterio ni estado —
+      antes la regla de update no fijaba esos campos). Tests en el
+      describe `'notas: corregir o borrar una nota mal puesta'`.
+    - **Sustituir a un profesor en todas sus clases**
+      (`SustitucionProfesorScreen`, botón "Sustituir" en la ficha del
+      profesor): sustituto + días + asignaturas (todas marcadas por
+      defecto); crea los mismos documentos de `sustituciones` que
+      `SustitucionesScreen`, uno por asignatura y día.
+    - **Horario general**: texto que explica tocar/arrastrar, y
+      "Deshacer" en el aviso tras mover una clase (restaura días, horas
+      y grupo de la matrícula).
+    - **Errores legibles**: `lib/utils/mensaje_error.dart`
+      (`mensajeError(e, porDefecto:)`) sustituye a mostrar `$e` tal cual
+      — traduce códigos de Firebase y deja pasar los `Exception('...')`
+      propios. `lib/widgets/error_carga.dart` (`ErrorCarga`) en ~50
+      listas que antes solo comprobaban `hasData` y se quedaban con la
+      rueda girando si fallaba la carga — usarlo en cualquier
+      `StreamBuilder`/`FutureBuilder` nuevo.
+    - Detalles: leyenda de colores en el calendario del alumno
+      (asistencia y estudio); textos de ayuda sobre qué casillas se
+      pueden tocar en las cuadrículas de notas y horas; "Nota final" en
+      vez de "Ponderada" (Mis notas); "Informe de horas de estudio" en
+      vez de "efectivas"; icono propio (ojo) para "Cuándo ve el alumno
+      sus notas"; plurales correctos; login con scroll (el teclado ya
+      no tapa el botón en móviles pequeños); los botones de asistencia
+      de la ficha de asignatura también llevan texto.
+    - Lo que quedaba (contacto de la familia, ayuda) se hizo en el
+      punto 76.
+
+76. **Contacto de la familia y ayuda para usuarios nuevos** (cierre de
+    la auditoría de usabilidad).
+    - **`contactosAlumno/{alumnoId}`** (`ContactoAlumno`): tutor legal,
+      teléfono, email de la familia, otro teléfono y observaciones.
+      Colección APARTE de `usuarios` a propósito: `usuarios` lo lee
+      cualquier profesor, y estos son datos personales de menores —
+      `firestore.rules` solo deja leer/escribir a dirección (ni
+      profesor ni el propio alumno) y nunca borrar. Sin datos de salud
+      (el diálogo lo advierte). Se ve y edita en `AlumnoPerfilScreen`
+      ("Contacto de la familia"). Criterio elegido por defecto sin
+      confirmar con dirección: si se pide que el profesorado también lo
+      vea, es cambiar la regla (y su test). Tests en el describe
+      `'contactosAlumno: datos de la familia solo para dirección'`.
+    - **Ayuda** (`AyudaScreen`, entrada "Ayuda" en el menú para todos):
+      preguntas "¿Cómo hago...?" desplegables, solo las del perfil de la
+      cuenta, con pasos que nombran los textos EXACTOS de menús y
+      botones — **si se renombra un menú o botón, actualizar también
+      `ayuda_screen.dart`**. En Inicio, tarjeta "¿Primera vez en Sotto
+      Studio?" con "Ver la ayuda"/"Entendido"
+      (`AjustesService.bienvenidaVista`, local por dispositivo).
+    - En la cuadrícula de notas, el nombre del alumno abre su ficha en
+      la pestaña Notas (antes el profesor no tenía un camino directo
+      para corregir o borrar una nota).
+    - Textos de 10-11 px subidos a 12 px.
+
 ## Nomenclatura de colecciones (fija, no renombrar sin avisar)
 
 `usuarios`, `sesionesEstudio`, `modulos`, `ejercicios`,
 `ejerciciosCompletados`, `notas`, `estadisticasAlumno`, `cursos`,
 `asignaturas`, `matriculas`, `asistencias`, `criteriosEvaluacion`,
 `sustituciones`, `horariosLaborales`, `marcajes`, `configuracion`,
-`gruposAsignatura`, `incidencias`, `plusesOrquesta`.
+`gruposAsignatura`, `incidencias`, `plusesOrquesta`, `contactosAlumno`.
 
+- `usuarios.activo` (bool, default `true`) y `usuarios.bajaEn`
+  (ISO8601): baja del centro sin borrar el documento — ver punto 73.
 - `usuarios.email` (nullable) y `usuarios.tieneCuenta` (bool, default
   `true`) — un alumno sin cuenta de Firebase Auth (creado con
   `AuthService.crearAlumnoSinCuenta`) no tiene email ni uid real
@@ -1742,15 +2135,14 @@ dirección — un almacén local en el centro no sirve.
   pueda comprobar sustituciones sin parsear fechas — ver punto 10.
 - `matriculas.profesorId`: profesor responsable de ese alumno en esa
   asignatura (`''` = sin asignar) — ver punto 10.
-- `cursos.horasObjetivoMensual` (double, 0 = sin objetivo),
-  `cursos.nivel`/`cursos.numeroCurso` y `cursos.iconoId` — ver puntos
-  17, 20 y 29. `asignaturas.iconoId` (string, `''` = icono por
-  defecto) sigue viviendo en `Asignatura` — solo el objetivo de horas
-  del punto 17 se movió a `Curso`, el icono no.
+- `cursos.nivel`/`cursos.numeroCurso` y `cursos.iconoId` — ver puntos
+  20 y 29. **`cursos.horasObjetivoMensual` existió entre los puntos 17
+  y 71, retirado por completo en el punto 72** — el objetivo de horas
+  vive SOLO en `Asignatura` ahora, no reintroducirlo en `Curso`.
 - `asignaturas.horasObjetivoSemanal`/`horasObjetivoMensual` (double, 0
-  = sin objetivo) — objetivo de horas MÁS FINO, por asignatura, que
-  coexiste con `cursos.horasObjetivoMensual` sin sustituirlo — ver
-  punto 52.
+  = sin objetivo) — ÚNICA fuente de objetivo de horas de toda la app
+  desde el punto 72 (antes coexistía con `cursos.horasObjetivoMensual`,
+  ver punto 52 para el histórico).
 - `asistencias.retraso` (bool, `false` por defecto) — ver punto 18.
 - `marcajes.pendienteValidacion` (bool, `false` por defecto) — ver
   punto 32.
@@ -1777,8 +2169,17 @@ dirección — un almacén local en el centro no sirve.
   misma franja para todos los días de `diasSemana`) y
   `matriculas.plusOrquestaId` (`''` = ninguno, referencia a
   `plusesOrquesta/{id}`) — ver puntos 66 y 67.
-- `plusesOrquesta`: `{ nombre, asignaturaDestinoId, horasSemana,
-  createdAt, createdBy }`, dirección-only, catálogo elegido al
+- `asignaturas.franjasHorario` (lista de `{ id, diasSemana, horaInicio,
+  horaFin }`, ver `FranjaHoraria`): franjas horarias de GRUPO, solo
+  para asignaturas que NO permiten grabar estudio — lista vacía = sin
+  franjas de grupo, rige el horario individual por matrícula de
+  siempre. `matriculas.franjaHorarioId` (`''` = ninguna) referencia a
+  cuál de esas franjas pertenece cada alumno; sus días/hora se copian
+  a `matriculas.diasSemana`/`horaInicio`/`horaFin` al elegirla y se
+  re-sincronizan si la franja cambia después — ver punto 69.
+- `plusesOrquesta`: `{ nombre, asignaturaDestinoId, minutosSemana,
+  createdAt, createdBy }` (`minutosSemana`, int, antes `horasSemana`
+  double — ver punto 72), dirección-only, catálogo elegido al
   matricular — ver punto 66.
 - `sesionesEstudio.origenAsistencia` (bool, solo presente en sesiones
   sintéticas generadas al marcar asistencia) y
@@ -1922,7 +2323,14 @@ sesiones de login, no de práctica musical, y crea confusión si reaparece.
   (hora inicio/fin), horario general de dirección y horario visible de
   alumno/profesor con propagación automática (ver punto 67,
   `HorarioGeneralScreen` + `HorarioScreen`); asistencia en instrumento
-  sumando horas de estudio automáticamente (ver punto 68).
+  sumando horas de estudio automáticamente (ver punto 68); horario de
+  grupo configurable desde la propia asignatura para asignaturas
+  teóricas, propagado a todas sus matrículas (ver punto 69); arrastrar
+  y soltar en el Horario general (ver punto 70); botón de asistente de
+  Claude dejado preparado en UI/transporte, sin backend todavía (ver
+  punto 71); objetivo de horas unificado solo en `Asignatura` (retirado
+  de `Curso`), plus de orquesta en minutos y desambiguación por curso
+  en su desplegable (ver punto 72).
 - Pantallas pendientes: registro público de alumno (hoy solo dirección
   da de alta, ver punto 6), ejercicios.
 - Creación de cuentas de **dirección** sigue siendo manual por consola

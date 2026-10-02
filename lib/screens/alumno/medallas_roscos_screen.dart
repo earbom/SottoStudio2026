@@ -6,6 +6,7 @@ import '../../models/matricula.dart';
 import '../../models/sesion_estudio.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../widgets/error_carga.dart';
 import '../../utils/iconos_asignatura.dart';
 
 /// Sistema de horas pendientes SEMANALES de estudio, por asignatura
@@ -33,12 +34,18 @@ class MedallasRoscosScreen extends StatelessWidget {
       body: StreamBuilder<String>(
         stream: db.cursoEscolarActivo(),
         builder: (context, snapActivo) {
+          if (snapActivo.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapActivo.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           return StreamBuilder<List<Matricula>>(
             stream: db.matriculasDeAlumno(perfil.uid, cursoEscolar: snapActivo.data!),
             builder: (context, snapMatriculas) {
+              if (snapMatriculas.hasError) {
+                return const ErrorCarga();
+              }
               if (!snapMatriculas.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -54,6 +61,9 @@ class MedallasRoscosScreen extends StatelessWidget {
               return StreamBuilder<List<SesionEstudio>>(
                 stream: db.historialAlumno(perfil.uid),
                 builder: (context, snapSesiones) {
+                  if (snapSesiones.hasError) {
+                    return const ErrorCarga();
+                  }
                   if (!snapSesiones.hasData) {
                     return const Center(child: CircularProgressIndicator());
                   }
@@ -62,6 +72,9 @@ class MedallasRoscosScreen extends StatelessWidget {
                     future: Future.wait(matriculas.map((m) => db.asignatura(m.asignaturaId)))
                         .then((r) => r.whereType<Asignatura>().toList()),
                     builder: (context, snapAsignaturas) {
+                      if (snapAsignaturas.hasError) {
+                        return const ErrorCarga();
+                      }
                       if (!snapAsignaturas.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }

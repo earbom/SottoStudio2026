@@ -5,6 +5,7 @@ import '../../models/marcaje.dart';
 import '../../models/usuario.dart';
 import '../../services/auth_service.dart';
 import '../../services/db_service.dart';
+import '../../widgets/error_carga.dart';
 import '../../utils/excel_marcajes.dart';
 
 final _formatoFecha = DateFormat('dd/MM/yyyy');
@@ -55,8 +56,8 @@ class _RegistroHorarioScreenState extends State<RegistroHorarioScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) => AlertDialog(
           title: Text(marcaje.pendienteValidacion
-              ? 'Revisar y validar ${marcaje.fecha}'
-              : 'Corregir ${marcaje.fecha}'),
+              ? 'Revisar y validar ${_formatoFecha.format(DateTime.parse(marcaje.fecha))}'
+              : 'Corregir ${_formatoFecha.format(DateTime.parse(marcaje.fecha))}'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -163,6 +164,9 @@ class _RegistroHorarioScreenState extends State<RegistroHorarioScreen> {
                 return StreamBuilder<List<Marcaje>>(
                   stream: _db.marcajesEnRango(desde: _desde, hasta: _hasta),
                   builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const ErrorCarga();
+                    }
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
@@ -185,7 +189,7 @@ class _RegistroHorarioScreenState extends State<RegistroHorarioScreen> {
                           leading: m.pendienteValidacion
                               ? const Icon(Icons.hourglass_top, color: Colors.orange)
                               : null,
-                          title: Text('$nombre · ${m.fecha}'),
+                          title: Text('$nombre · ${_formatoFecha.format(DateTime.parse(m.fecha))}'),
                           subtitle: Text('Entrada $entrada · Salida $salida'
                               '${m.pendienteValidacion ? ' (pendiente de validar)' : m.corregidoPor != null ? ' (corregido)' : ''}'),
                           trailing: IconButton(

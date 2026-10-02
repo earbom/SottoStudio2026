@@ -45,11 +45,6 @@ class Curso {
   // Referencia a IconoAsignatura.id (lib/utils/iconos_asignatura.dart),
   // mismo catálogo que las asignaturas.
   final String iconoId;
-  // Horas de estudio EFECTIVO objetivo por mes para un alumno de este
-  // curso, sea cual sea la asignatura concreta que curse (sustituye al
-  // objetivo que antes vivía en Asignatura — ver CLAUDE.md). 0 = sin
-  // objetivo definido.
-  final double horasObjetivoMensual;
   final DateTime createdAt;
   final String createdBy;
 
@@ -60,7 +55,6 @@ class Curso {
     this.nivel = NivelCurso.libre,
     this.numeroCurso,
     this.iconoId = '',
-    this.horasObjetivoMensual = 0,
     required this.createdAt,
     required this.createdBy,
   });
@@ -73,7 +67,6 @@ class Curso {
       nivel: nivelCursoDesdeTexto(data['nivel'] ?? 'libre'),
       numeroCurso: (data['numeroCurso'] as num?)?.toInt(),
       iconoId: data['iconoId'] ?? '',
-      horasObjetivoMensual: (data['horasObjetivoMensual'] as num?)?.toDouble() ?? 0,
       createdAt: DateTime.tryParse(data['createdAt'] ?? '') ?? DateTime.now(),
       createdBy: data['createdBy'] ?? '',
     );
@@ -86,7 +79,6 @@ class Curso {
       'nivel': nivel.name,
       'numeroCurso': numeroCurso,
       'iconoId': iconoId,
-      'horasObjetivoMensual': horasObjetivoMensual,
       'createdAt': createdAt.toIso8601String(),
       'createdBy': createdBy,
     };

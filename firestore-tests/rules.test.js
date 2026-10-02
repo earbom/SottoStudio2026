@@ -447,26 +447,26 @@ describe('plusesOrquesta', () => {
     });
   });
 
-  it('dirección puede crear un plus con horasSemana válidas', async () => {
+  it('dirección puede crear un plus con minutosSemana válidos', async () => {
     const direccion = testEnv.authenticatedContext('dir1').firestore();
     await assertSucceeds(
       direccion.collection('plusesOrquesta').add({
         nombre: 'Orquesta de guitarras',
         asignaturaDestinoId: 'guitarra',
-        horasSemana: 0.5,
+        minutosSemana: 20,
         createdAt: new Date().toISOString(),
         createdBy: 'dir1',
       })
     );
   });
 
-  it('rechaza horasSemana negativas', async () => {
+  it('rechaza minutosSemana negativos', async () => {
     const direccion = testEnv.authenticatedContext('dir1').firestore();
     await assertFails(
       direccion.collection('plusesOrquesta').add({
         nombre: 'Orquesta de guitarras',
         asignaturaDestinoId: 'guitarra',
-        horasSemana: -1,
+        minutosSemana: -1,
         createdAt: new Date().toISOString(),
         createdBy: 'dir1',
       })
@@ -479,7 +479,7 @@ describe('plusesOrquesta', () => {
       profesor.collection('plusesOrquesta').add({
         nombre: 'Orquesta de guitarras',
         asignaturaDestinoId: 'guitarra',
-        horasSemana: 0.5,
+        minutosSemana: 20,
         createdAt: new Date().toISOString(),
         createdBy: 'profesorA',
       })
@@ -491,7 +491,7 @@ describe('plusesOrquesta', () => {
       await db.collection('plusesOrquesta').doc('plus1').set({
         nombre: 'Orquesta de guitarras',
         asignaturaDestinoId: 'guitarra',
-        horasSemana: 0.5,
+        minutosSemana: 20,
         createdAt: new Date().toISOString(),
         createdBy: 'dir1',
       });
@@ -1406,5 +1406,182 @@ describe('sesionesEstudio: sesión sintética generada al marcar asistencia', ()
     await assertFails(
       alumno2.collection('sesionesEstudio').doc('asistencia_alumno1_guitarra_2026-01-05').set(sesion)
     );
+  });
+});
+
+describe('bajas del centro (usuarios.activo == false)', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('dir1').set({ permisos: ['direccion'] });
+      await db.collection('usuarios').doc('profesorBaja').set({ permisos: ['profesor'], activo: false });
+      await db.collection('usuarios').doc('dirBaja').set({ permisos: ['direccion'], activo: false });
+      await db.collection('usuarios').doc('alumnoBaja').set({ nombre: 'A', permisos: ['alumno'], activo: false });
+      await db.collection('asignaturas').doc('guitarra').set({
+        cursoId: 'curso1', nombre: 'Guitarra', nombreNormalizado: 'guitarra', profesorIds: ['profesorBaja'],
+      });
+      await db.collection('gruposAsignatura').doc('guitarra').set({ profesorIds: ['profesorBaja'] });
+    });
+  });
+
+  it('un profesor dado de baja ya no puede poner notas', async () => {
+    const profesor = testEnv.authenticatedContext('profesorBaja').firestore();
+    await assertFails(
+      profesor.collection('notas').add({
+        alumnoId: 'alumno1', profesorId: 'profesorBaja', asignaturaId: 'guitarra', criterioId: 'c1',
+        valor: 7, estado: 'pendiente', fecha: new Date().toISOString(), fechaDia: '2026-10-02',
+      })
+    );
+  });
+
+  it('una cuenta de dirección dada de baja ya no puede gestionar cursos', async () => {
+    const dir = testEnv.authenticatedContext('dirBaja').firestore();
+    await assertFails(dir.collection('cursos').add({ nombre: 'X' }));
+  });
+
+  it('un usuario dado de baja NO puede reactivarse a sí mismo', async () => {
+    const alumno = testEnv.authenticatedContext('alumnoBaja').firestore();
+    await assertFails(alumno.collection('usuarios').doc('alumnoBaja').update({ activo: true }));
+  });
+
+  it('un usuario activo puede seguir editando su propio documento sin tocar activo', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('alumno1').set({ nombre: 'B', permisos: ['alumno'] });
+    });
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertSucceeds(alumno.collection('usuarios').doc('alumno1').update({ nombre: 'Bea' }));
+  });
+
+  it('dirección activa puede dar de baja y reactivar', async () => {
+    const dir = testEnv.authenticatedContext('dir1').firestore();
+    await assertSucceeds(dir.collection('usuarios').doc('alumnoBaja').update({ activo: true }));
+  });
+});
+
+describe('sustituto de otra asignatura: lista de alumnos y asistencia del día', () => {
+  const hoyUtc = new Date().toISOString().slice(0, 10);
+
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('sustituto').set({ permisos: ['profesor'] });
+      await db.collection('asignaturas').doc('piano').set({
+        cursoId: 'curso1', nombre: 'Piano', nombreNormalizado: 'piano', profesorIds: ['titular'],
+      });
+      await db.collection('gruposAsignatura').doc('piano').set({ profesorIds: ['titular'] });
+      await db.collection('matriculas').doc('alumno1_piano_2026-2027').set({
+        alumnoId: 'alumno1', asignaturaId: 'piano', cursoId: 'curso1', cursoEscolar: '2026-2027',
+        activa: true, profesorId: 'titular', fechaAlta: new Date().toISOString(),
+      });
+      await db.collection('asistencias').doc(`alumno1_piano_${hoyUtc}`).set({
+        alumnoId: 'alumno1', asignaturaId: 'piano', fecha: hoyUtc, asistio: true, cursoEscolar: '2026-2027',
+      });
+    });
+  });
+
+  it('sin sustitución, NO puede ver la lista de alumnos', async () => {
+    const sustituto = testEnv.authenticatedContext('sustituto').firestore();
+    await assertFails(
+      sustituto.collection('matriculas')
+        .where('asignaturaId', '==', 'piano')
+        .where('cursoEscolar', '==', '2026-2027')
+        .where('activa', '==', true)
+        .get()
+    );
+  });
+
+  it('con sustitución HOY, puede ver la lista de alumnos y la asistencia del día', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('sustituciones').doc(`piano_sustituto_${hoyUtc}`).set({
+        asignaturaId: 'piano', profesorId: 'sustituto', fecha: hoyUtc,
+      });
+    });
+    const sustituto = testEnv.authenticatedContext('sustituto').firestore();
+    await assertSucceeds(
+      sustituto.collection('matriculas')
+        .where('asignaturaId', '==', 'piano')
+        .where('cursoEscolar', '==', '2026-2027')
+        .where('activa', '==', true)
+        .get()
+    );
+    await assertSucceeds(sustituto.collection('asistencias').doc(`alumno1_piano_${hoyUtc}`).get());
+  });
+
+  it('con sustitución OTRO día, no puede ver la lista hoy', async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('sustituciones').doc('piano_sustituto_2020-01-01').set({
+        asignaturaId: 'piano', profesorId: 'sustituto', fecha: '2020-01-01',
+      });
+    });
+    const sustituto = testEnv.authenticatedContext('sustituto').firestore();
+    await assertFails(
+      sustituto.collection('matriculas')
+        .where('asignaturaId', '==', 'piano')
+        .where('cursoEscolar', '==', '2026-2027')
+        .where('activa', '==', true)
+        .get()
+    );
+  });
+});
+
+describe('notas: corregir o borrar una nota mal puesta', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('profesorB').set({ permisos: ['profesor'] });
+      const base = { alumnoId: 'alumno1', profesorId: 'profesorA', asignaturaId: 'piano', criterioId: 'c1', comentario: '' };
+      await db.collection('notas').doc('pendiente').set({ ...base, valor: 5, estado: 'pendiente' });
+      await db.collection('notas').doc('validada').set({ ...base, valor: 5, estado: 'supervisada' });
+    });
+  });
+
+  it('el autor puede corregir el valor de su nota pendiente', async () => {
+    const a = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(a.collection('notas').doc('pendiente').update({ valor: 7.5, comentario: 'revisado' }));
+  });
+
+  it('el autor NO puede cambiar el alumno ni validarla él mismo', async () => {
+    const a = testEnv.authenticatedContext('profesorA').firestore();
+    await assertFails(a.collection('notas').doc('pendiente').update({ alumnoId: 'otro' }));
+    await assertFails(a.collection('notas').doc('pendiente').update({ estado: 'supervisada' }));
+  });
+
+  it('el autor puede borrar su nota pendiente, pero no una ya validada', async () => {
+    const a = testEnv.authenticatedContext('profesorA').firestore();
+    await assertSucceeds(a.collection('notas').doc('pendiente').delete());
+    await assertFails(a.collection('notas').doc('validada').delete());
+  });
+
+  it('otro profesor NO puede corregir ni borrar la nota', async () => {
+    const b = testEnv.authenticatedContext('profesorB').firestore();
+    await assertFails(b.collection('notas').doc('pendiente').update({ valor: 9 }));
+    await assertFails(b.collection('notas').doc('pendiente').delete());
+  });
+});
+
+describe('contactosAlumno: datos de la familia solo para dirección', () => {
+  beforeEach(async () => {
+    await conDatosDePrueba(async (db) => {
+      await db.collection('usuarios').doc('dir1').set({ permisos: ['direccion'] });
+      await db.collection('usuarios').doc('profesorA').set({ permisos: ['profesor'] });
+      await db.collection('usuarios').doc('alumno1').set({ permisos: ['alumno'] });
+      await db.collection('contactosAlumno').doc('alumno1').set({ tutorNombre: 'Madre', tutorTelefono: '600000000' });
+    });
+  });
+
+  it('dirección puede leer y guardar el contacto', async () => {
+    const dir = testEnv.authenticatedContext('dir1').firestore();
+    await assertSucceeds(dir.collection('contactosAlumno').doc('alumno1').get());
+    await assertSucceeds(dir.collection('contactosAlumno').doc('alumno2').set({ tutorNombre: 'Padre' }));
+  });
+
+  it('ni un profesor ni el propio alumno pueden leerlo', async () => {
+    const profesor = testEnv.authenticatedContext('profesorA').firestore();
+    const alumno = testEnv.authenticatedContext('alumno1').firestore();
+    await assertFails(profesor.collection('contactosAlumno').doc('alumno1').get());
+    await assertFails(alumno.collection('contactosAlumno').doc('alumno1').get());
+  });
+
+  it('nadie lo borra desde la app', async () => {
+    const dir = testEnv.authenticatedContext('dir1').firestore();
+    await assertFails(dir.collection('contactosAlumno').doc('alumno1').delete());
   });
 });

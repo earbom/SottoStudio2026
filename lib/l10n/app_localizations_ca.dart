@@ -44,6 +44,28 @@ class AppLocalizationsCa extends AppLocalizations {
       'No s\'ha pogut enviar l\'email. Comprova l\'adreça.';
 
   @override
+  String get menuInicio => 'Inici';
+
+  @override
+  String get menuConfiguracionCentro => 'Configuració del centre';
+
+  @override
+  String get menuAyuda => 'Ajuda';
+
+  @override
+  String get inicioBienvenidaTitulo => 'Primera vegada a Sotto Studio?';
+
+  @override
+  String get inicioBienvenidaTexto =>
+      'A l\'Ajuda tens, pas a pas, com fer cada tasca. També la trobaràs sempre al menú (☰).';
+
+  @override
+  String get inicioBienvenidaVerAyuda => 'Veure l\'ajuda';
+
+  @override
+  String get inicioBienvenidaCerrar => 'Entesos';
+
+  @override
   String get menuGestionCentro => 'Gestió del centre';
 
   @override
@@ -68,7 +90,7 @@ class AppLocalizationsCa extends AppLocalizations {
   String get menuInformeHoras => 'Informe d\'hores';
 
   @override
-  String get menuInformeHorasTitulo => 'Informe d\'hores efectives';
+  String get menuInformeHorasTitulo => 'Informe d\'hores d\'estudi';
 
   @override
   String get menuRegistroHorario => 'Registre horari';
@@ -185,7 +207,7 @@ class AppLocalizationsCa extends AppLocalizations {
 
   @override
   String get ajustesTamanoIconosDescripcion =>
-      'Afecta la quadrícula d\'icones de \"Cursos i assignatures\" i \"Les meves assignatures\".';
+      'Afecta la quadrícula d\'icones de \"Assignatures\" i \"Les meves assignatures\".';
 
   @override
   String get ajustesConfirmarCierreSesion => 'Confirmar abans de tancar sessió';
@@ -219,6 +241,19 @@ class AppLocalizationsCa extends AppLocalizations {
   }
 
   @override
+  String get ajustesAsistenteTitulo => 'Assistent (Claude)';
+
+  @override
+  String get ajustesAsistenteDescripcion =>
+      'URL del servidor propi del centre que connecta el botó de l\'assistent amb l\'API de Claude. La clau de l\'API viu només en aquest servidor, mai en aquesta app.';
+
+  @override
+  String get ajustesAsistenteUrlLabel => 'URL del servidor';
+
+  @override
+  String get ajustesAsistenteGuardar => 'Desa';
+
+  @override
   String get ajustesRestablecer => 'Restableix els valors per defecte';
 
   @override
@@ -238,6 +273,11 @@ class AppLocalizationsCa extends AppLocalizations {
 
   @override
   String get fichajesSalida => 'Sortida';
+
+  @override
+  String fichajesConfirmarHora(Object hora) {
+    return 'Es registrarà a les $hora. Un cop fitxat no es pot canviar (només direcció ho pot corregir).';
+  }
 
   @override
   String get fichajesFicharEntrada => 'Fitxar entrada';
@@ -334,11 +374,49 @@ class AppLocalizationsCa extends AppLocalizations {
 
   @override
   String grabarEstudioEfectivo(Object tiempo) {
-    return 'Efectiu: $tiempo';
+    return 'Tocant: $tiempo';
   }
 
   @override
   String grabarEstudioTotal(Object tiempo) {
-    return 'Total: $tiempo';
+    return 'Temps total: $tiempo';
   }
+
+  @override
+  String get grabarEstudioPulsaEmpezar =>
+      'Prem el micròfon per començar a gravar el teu estudi.';
+
+  @override
+  String get grabarEstudioGrabando =>
+      'Gravant… Quan acabis, prem el botó vermell per desar.';
+
+  @override
+  String get grabarEstudioExplicacion =>
+      '«Tocant» només compta mentre sona el teu instrument (les pauses curtes també compten). No es desa cap àudio.';
+
+  @override
+  String grabarEstudioGuardada(Object minutos) {
+    return 'Sessió desada! Has tocat $minutos min.';
+  }
+
+  @override
+  String get grabarEstudioErrorMicro =>
+      'No es pot fer servir el micròfon. Dona-li permís a la configuració del mòbil i torna-ho a provar.';
+
+  @override
+  String get grabarEstudioErrorGuardar =>
+      'No s\'ha pogut desar la sessió. Comprova la connexió a internet.';
+
+  @override
+  String get grabarEstudioSalirTitulo => 'Estàs gravant';
+
+  @override
+  String get grabarEstudioSalirTexto =>
+      'Si surts ara, aturem la gravació i desem el que portes.';
+
+  @override
+  String get grabarEstudioSeguir => 'Continuar gravant';
+
+  @override
+  String get grabarEstudioGuardarYSalir => 'Desar i sortir';
 }

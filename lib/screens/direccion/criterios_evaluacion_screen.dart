@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/asignatura.dart';
 import '../../models/criterio_evaluacion.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 /// Dirección define aquí, por asignatura, qué actividades/controles
@@ -20,48 +21,6 @@ class CriteriosEvaluacionScreen extends StatefulWidget {
 class _CriteriosEvaluacionScreenState extends State<CriteriosEvaluacionScreen> {
   final DbService _db = DbService();
   final AuthService _auth = AuthService();
-  late final TextEditingController _objetivoSemanalCtrl;
-  late final TextEditingController _objetivoMensualCtrl;
-  bool _guardandoObjetivo = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _objetivoSemanalCtrl = TextEditingController(
-        text: widget.asignatura.horasObjetivoSemanal > 0
-            ? widget.asignatura.horasObjetivoSemanal.toStringAsFixed(1)
-            : '');
-    _objetivoMensualCtrl = TextEditingController(
-        text: widget.asignatura.horasObjetivoMensual > 0
-            ? widget.asignatura.horasObjetivoMensual.toStringAsFixed(1)
-            : '');
-  }
-
-  @override
-  void dispose() {
-    _objetivoSemanalCtrl.dispose();
-    _objetivoMensualCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _guardarObjetivoHoras() async {
-    setState(() => _guardandoObjetivo = true);
-    try {
-      await _db.actualizarAsignatura(widget.asignatura.id!, {
-        'horasObjetivoSemanal':
-            double.tryParse(_objetivoSemanalCtrl.text.replaceAll(',', '.')) ?? 0,
-        'horasObjetivoMensual':
-            double.tryParse(_objetivoMensualCtrl.text.replaceAll(',', '.')) ?? 0,
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Objetivo de horas guardado.')));
-      }
-    } finally {
-      if (mounted) setState(() => _guardandoObjetivo = false);
-    }
-  }
-
   Future<void> _crearOEditarCriterio({CriterioEvaluacion? existente}) async {
     final nombreCtrl = TextEditingController(text: existente?.nombre ?? '');
     final pesoCtrl = TextEditingController(text: existente?.peso.toStringAsFixed(0) ?? '');
@@ -136,6 +95,9 @@ class _CriteriosEvaluacionScreenState extends State<CriteriosEvaluacionScreen> {
       body: StreamBuilder<List<CriterioEvaluacion>>(
         stream: _db.criteriosDeAsignatura(widget.asignatura.id!),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -144,58 +106,6 @@ class _CriteriosEvaluacionScreenState extends State<CriteriosEvaluacionScreen> {
 
           return Column(
             children: [
-              // Objetivo de horas de estudio de la asignatura (ver
-              // CLAUDE.md): NO cuenta para la nota, es independiente de
-              // los criterios de abajo — se guarda directamente en
-              // Asignatura, no como un CriterioEvaluacion más.
-              Card(
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Objetivo de horas de estudio (no afecta a la nota)',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _objetivoSemanalCtrl,
-                              decoration:
-                                  const InputDecoration(labelText: 'Objetivo semanal (h)'),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _objetivoMensualCtrl,
-                              decoration:
-                                  const InputDecoration(labelText: 'Objetivo mensual (h)'),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          FilledButton.tonal(
-                            onPressed: _guardandoObjetivo ? null : _guardarObjetivoHoras,
-                            child: _guardandoObjetivo
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Text('Guardar'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
               Container(
                 width: double.infinity,
                 color: (pesoTotal - 100).abs() < 0.01

@@ -8,6 +8,7 @@ import '../../models/usuario.dart';
 import '../../services/ajustes_service.dart';
 import '../../services/db_service.dart';
 import '../../services/exportacion_automatica_marcajes_service.dart';
+import '../../utils/mensaje_error.dart';
 import '../../utils/iconos_asignatura.dart';
 
 class AjustesScreen extends StatefulWidget {
@@ -21,6 +22,20 @@ class AjustesScreen extends StatefulWidget {
 
 class _AjustesScreenState extends State<AjustesScreen> {
   bool _exportando = false;
+  late final TextEditingController _asistenteUrlCtrl;
+  bool _asistenteUrlInicializada = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _asistenteUrlCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _asistenteUrlCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _elegirCarpetaExportacion(AjustesService ajustes) async {
     final ruta = await FilePicker.platform.getDirectoryPath(
@@ -43,7 +58,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.ajustesExportacionError('$e'))),
+        SnackBar(content: Text(l10n.ajustesExportacionError(mensajeError(e, porDefecto: '—')))),
       );
     } finally {
       if (mounted) setState(() => _exportando = false);
@@ -54,6 +69,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final ajustes = context.watch<AjustesService>();
+    if (!_asistenteUrlInicializada) {
+      _asistenteUrlCtrl.text = ajustes.asistenteUrl;
+      _asistenteUrlInicializada = true;
+    }
     // La exportación automática escribe con dart:io en una carpeta
     // local, algo que no existe como concepto en web — y solo tiene
     // sentido para dirección, que es quien gestiona el registro
@@ -164,6 +183,33 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
               ),
             ],
+          ],
+          if (widget.perfil.esDireccion) ...[
+            const Divider(height: 40),
+            Text(l10n.ajustesAsistenteTitulo, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(l10n.ajustesAsistenteDescripcion, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _asistenteUrlCtrl,
+                    decoration: InputDecoration(
+                      labelText: l10n.ajustesAsistenteUrlLabel,
+                      hintText: 'https://…',
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () => ajustes.cambiarAsistenteUrl(_asistenteUrlCtrl.text),
+                  child: Text(l10n.ajustesAsistenteGuardar),
+                ),
+              ],
+            ),
           ],
           const SizedBox(height: 24),
           Center(

@@ -39,7 +39,8 @@ class _LoginScreenState extends State<LoginScreen> {
       // en el widget raíz (ver main.dart) escuchando el stream de
       // usuario + su documento en Firestore.
     } catch (e) {
-      setState(() => _error = AppLocalizations.of(context)!.loginCredencialesIncorrectas);
+      setState(() =>
+          _error = AppLocalizations.of(context)!.loginCredencialesIncorrectas);
     } finally {
       setState(() => _cargando = false);
     }
@@ -50,10 +51,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final enviar = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(AppLocalizations.of(context)!.loginRecuperarContrasenaTitulo),
+        title:
+            Text(AppLocalizations.of(context)!.loginRecuperarContrasenaTitulo),
         content: TextField(
           controller: emailCtrl,
-          decoration: InputDecoration(labelText: AppLocalizations.of(context)!.loginEmail),
+          decoration: InputDecoration(
+              labelText: AppLocalizations.of(context)!.loginEmail),
           keyboardType: TextInputType.emailAddress,
           autofocus: true,
         ),
@@ -91,61 +94,72 @@ class _LoginScreenState extends State<LoginScreen> {
     final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LogoOh(
-                  size: 96,
-                  sobreFondoOscuro: Theme.of(context).brightness == Brightness.dark,
-                ),
-                const SizedBox(height: 16),
-                const Text('Sotto Studio', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 32),
-                TextField(
-                  controller: _emailCtrl,
-                  decoration: InputDecoration(labelText: l10n.loginEmail),
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  onSubmitted: (_) => _passFocus.requestFocus(),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passCtrl,
-                  focusNode: _passFocus,
-                  decoration: InputDecoration(
-                    labelText: l10n.loginPassword,
-                    suffixIcon: IconButton(
-                      icon: Icon(_mostrarPassword ? Icons.visibility_off : Icons.visibility),
-                      onPressed: () => setState(() => _mostrarPassword = !_mostrarPassword),
+        child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LogoOh(
+                    size: 96,
+                    sobreFondoOscuro:
+                        Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Sotto Studio',
+                      style:
+                          TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 32),
+                  TextField(
+                    controller: _emailCtrl,
+                    decoration: InputDecoration(labelText: l10n.loginEmail),
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _passFocus.requestFocus(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _passCtrl,
+                    focusNode: _passFocus,
+                    decoration: InputDecoration(
+                      labelText: l10n.loginPassword,
+                      suffixIcon: IconButton(
+                        icon: Icon(_mostrarPassword
+                            ? Icons.visibility_off
+                            : Icons.visibility),
+                        onPressed: () => setState(
+                            () => _mostrarPassword = !_mostrarPassword),
+                      ),
                     ),
+                    obscureText: !_mostrarPassword,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _cargando ? null : _iniciarSesion(),
                   ),
-                  obscureText: !_mostrarPassword,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _cargando ? null : _iniciarSesion(),
-                ),
-                const SizedBox(height: 24),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 24),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(_error!,
+                          style: const TextStyle(color: Colors.red)),
+                    ),
+                  FilledButton(
+                    onPressed: _cargando ? null : _iniciarSesion,
+                    child: _cargando
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(l10n.loginIniciarSesion),
                   ),
-                FilledButton(
-                  onPressed: _cargando ? null : _iniciarSesion,
-                  child: _cargando
-                      ? const SizedBox(
-                          width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(l10n.loginIniciarSesion),
-                ),
-                TextButton(
-                  onPressed: _cargando ? null : _recuperarPassword,
-                  child: Text(l10n.loginOlvidasteContrasena),
-                ),
-                // TODO: enlace a pantalla de registro.
-              ],
+                  TextButton(
+                    onPressed: _cargando ? null : _recuperarPassword,
+                    child: Text(l10n.loginOlvidasteContrasena),
+                  ),
+                  // TODO: enlace a pantalla de registro.
+                ],
+              ),
             ),
           ),
         ),

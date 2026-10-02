@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../utils/mensaje_error.dart';
 import '../../services/auth_service.dart';
 
 class CambiarPasswordScreen extends StatefulWidget {
@@ -52,7 +53,7 @@ class _CambiarPasswordScreenState extends State<CambiarPasswordScreen> {
             _ => 'No se pudo cambiar la contraseña (${e.code}).',
           });
     } catch (e) {
-      setState(() => _error = 'No se pudo cambiar la contraseña: $e');
+      setState(() => _error = mensajeError(e, porDefecto: 'No se pudo cambiar la contraseña.'));
     } finally {
       if (mounted) setState(() => _cargando = false);
     }

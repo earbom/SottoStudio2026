@@ -5,6 +5,7 @@ import '../../models/marcaje.dart';
 import '../../models/horario_laboral.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../utils/mensaje_error.dart';
 import '../../services/recordatorio_fichaje_service.dart';
 
 final _formatoHora = DateFormat('HH:mm');
@@ -59,12 +60,33 @@ class _FichajesScreenState extends State<FichajesScreen> {
     }
   }
 
+  // El registro no se puede editar una vez fichado (Art. 34.9 ET, ver
+  // CLAUDE.md): un toque accidental obligaría a pedir a dirección que
+  // lo corrija, así que se confirma antes con la hora que se grabará.
+  Future<bool> _confirmarFichaje(String titulo) async {
+    final l10n = AppLocalizations.of(context)!;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(titulo),
+        content: Text(l10n.fichajesConfirmarHora(_formatoHora.format(DateTime.now()))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.comunCancelar)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(titulo)),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _ficharEntrada() async {
+    if (!await _confirmarFichaje(AppLocalizations.of(context)!.fichajesFicharEntrada)) return;
     await _db.ficharEntrada(widget.perfil.uid);
     _cargar();
   }
 
   Future<void> _ficharSalida() async {
+    if (!await _confirmarFichaje(AppLocalizations.of(context)!.fichajesFicharSalida)) return;
     await _db.ficharSalida(widget.perfil.uid);
     _cargar();
   }
@@ -111,7 +133,7 @@ class _FichajesScreenState extends State<FichajesScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo enviar.'))));
     }
   }
 
@@ -326,7 +348,7 @@ class _FichajesScreenState extends State<FichajesScreen> {
                   final salida = m.horaSalida != null ? _formatoHora.format(m.horaSalida!) : '--:--';
                   return ListTile(
                     dense: true,
-                    title: Text(m.fecha),
+                    title: Text(_formatoFecha.format(DateTime.parse(m.fecha))),
                     subtitle: Text('${l10n.fichajesEntrada} $entrada · ${l10n.fichajesSalida} $salida'
                         '${m.corregidoPor != null ? ' ${l10n.fichajesCorregido}' : ''}'),
                     trailing: m.pendienteValidacion

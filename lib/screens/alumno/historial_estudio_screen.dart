@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/sesion_estudio.dart';
 import '../../models/asignatura.dart';
+import '../../widgets/error_carga.dart';
 import '../../services/db_service.dart';
 
 final _formatoFecha = DateFormat('dd/MM/yyyy HH:mm');
@@ -26,6 +27,9 @@ class HistorialEstudioScreen extends StatelessWidget {
       body: StreamBuilder<List<SesionEstudio>>(
         stream: db.historialAlumno(alumnoId),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }

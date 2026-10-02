@@ -168,14 +168,15 @@ class _ProgresoObjetivoAsignatura extends StatelessWidget {
           .where((s) => !s.fechaInicio.isBefore(inicioMes) && s.fechaInicio.isBefore(finMes))
           .fold<int>(0, (acc, s) => acc + s.duracionEfectivaMs);
       // Plus de orquesta (ver CLAUDE.md): misma aproximación
-      // horasSemana × 4 que en la cuadrícula mensual de Horas.
+      // minutosSemana × 4 / 60 que en la cuadrícula mensual de Horas.
       final pluses = await db.plusesOrquestaAplicablesDeAlumno(
         alumnoId: m.alumnoId,
         asignaturaDestinoId: asignatura.id!,
         cursoEscolar: cursoEscolar,
       );
-      final plusMes =
-          pluses.where((p) => !p.desde.isAfter(finMes)).fold<double>(0, (acc, p) => acc + p.horasSemana * 4);
+      final plusMes = pluses
+          .where((p) => !p.desde.isAfter(finMes))
+          .fold<double>(0, (acc, p) => acc + p.minutosSemana * 4 / 60.0);
       resultado.add((alumno: alumno, horasMes: ms / 3600000 + plusMes));
     }
     return resultado;

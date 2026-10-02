@@ -164,6 +164,48 @@ abstract class AppLocalizations {
   /// **'No se pudo enviar el email. Comprueba la dirección.'**
   String get loginEmailError;
 
+  /// No description provided for @menuInicio.
+  ///
+  /// In es, this message translates to:
+  /// **'Inicio'**
+  String get menuInicio;
+
+  /// No description provided for @menuConfiguracionCentro.
+  ///
+  /// In es, this message translates to:
+  /// **'Configuración del centro'**
+  String get menuConfiguracionCentro;
+
+  /// No description provided for @menuAyuda.
+  ///
+  /// In es, this message translates to:
+  /// **'Ayuda'**
+  String get menuAyuda;
+
+  /// No description provided for @inicioBienvenidaTitulo.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Primera vez en Sotto Studio?'**
+  String get inicioBienvenidaTitulo;
+
+  /// No description provided for @inicioBienvenidaTexto.
+  ///
+  /// In es, this message translates to:
+  /// **'En la Ayuda tienes, paso a paso, cómo hacer cada tarea. También la encontrarás siempre en el menú (☰).'**
+  String get inicioBienvenidaTexto;
+
+  /// No description provided for @inicioBienvenidaVerAyuda.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver la ayuda'**
+  String get inicioBienvenidaVerAyuda;
+
+  /// No description provided for @inicioBienvenidaCerrar.
+  ///
+  /// In es, this message translates to:
+  /// **'Entendido'**
+  String get inicioBienvenidaCerrar;
+
   /// No description provided for @menuGestionCentro.
   ///
   /// In es, this message translates to:
@@ -215,7 +257,7 @@ abstract class AppLocalizations {
   /// No description provided for @menuInformeHorasTitulo.
   ///
   /// In es, this message translates to:
-  /// **'Informe de horas efectivas'**
+  /// **'Informe de horas de estudio'**
   String get menuInformeHorasTitulo;
 
   /// No description provided for @menuRegistroHorario.
@@ -419,7 +461,7 @@ abstract class AppLocalizations {
   /// No description provided for @ajustesTamanoIconosDescripcion.
   ///
   /// In es, this message translates to:
-  /// **'Afecta a la cuadrícula de iconos de \"Cursos y asignaturas\" y \"Mis asignaturas\".'**
+  /// **'Afecta a la cuadrícula de iconos de \"Asignaturas\" y \"Mis asignaturas\".'**
   String get ajustesTamanoIconosDescripcion;
 
   /// No description provided for @ajustesConfirmarCierreSesion.
@@ -476,6 +518,30 @@ abstract class AppLocalizations {
   /// **'No se pudo exportar: {error}'**
   String ajustesExportacionError(Object error);
 
+  /// No description provided for @ajustesAsistenteTitulo.
+  ///
+  /// In es, this message translates to:
+  /// **'Asistente (Claude)'**
+  String get ajustesAsistenteTitulo;
+
+  /// No description provided for @ajustesAsistenteDescripcion.
+  ///
+  /// In es, this message translates to:
+  /// **'URL del servidor propio del centro que conecta el botón del asistente con la API de Claude. La clave de la API vive solo en ese servidor, nunca en esta app.'**
+  String get ajustesAsistenteDescripcion;
+
+  /// No description provided for @ajustesAsistenteUrlLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'URL del servidor'**
+  String get ajustesAsistenteUrlLabel;
+
+  /// No description provided for @ajustesAsistenteGuardar.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardar'**
+  String get ajustesAsistenteGuardar;
+
   /// No description provided for @ajustesRestablecer.
   ///
   /// In es, this message translates to:
@@ -517,6 +583,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Salida'**
   String get fichajesSalida;
+
+  /// No description provided for @fichajesConfirmarHora.
+  ///
+  /// In es, this message translates to:
+  /// **'Se registrará a las {hora}. Una vez fichado no se puede cambiar (solo dirección puede corregirlo).'**
+  String fichajesConfirmarHora(Object hora);
 
   /// No description provided for @fichajesFicharEntrada.
   ///
@@ -695,14 +767,74 @@ abstract class AppLocalizations {
   /// No description provided for @grabarEstudioEfectivo.
   ///
   /// In es, this message translates to:
-  /// **'Efectivo: {tiempo}'**
+  /// **'Tocando: {tiempo}'**
   String grabarEstudioEfectivo(Object tiempo);
 
   /// No description provided for @grabarEstudioTotal.
   ///
   /// In es, this message translates to:
-  /// **'Total: {tiempo}'**
+  /// **'Tiempo total: {tiempo}'**
   String grabarEstudioTotal(Object tiempo);
+
+  /// No description provided for @grabarEstudioPulsaEmpezar.
+  ///
+  /// In es, this message translates to:
+  /// **'Pulsa el micrófono para empezar a grabar tu estudio.'**
+  String get grabarEstudioPulsaEmpezar;
+
+  /// No description provided for @grabarEstudioGrabando.
+  ///
+  /// In es, this message translates to:
+  /// **'Grabando… Cuando termines, pulsa el botón rojo para guardar.'**
+  String get grabarEstudioGrabando;
+
+  /// No description provided for @grabarEstudioExplicacion.
+  ///
+  /// In es, this message translates to:
+  /// **'«Tocando» solo cuenta mientras suena tu instrumento (las pausas cortas también cuentan). No se guarda nada de audio.'**
+  String get grabarEstudioExplicacion;
+
+  /// No description provided for @grabarEstudioGuardada.
+  ///
+  /// In es, this message translates to:
+  /// **'¡Sesión guardada! Has tocado {minutos} min.'**
+  String grabarEstudioGuardada(Object minutos);
+
+  /// No description provided for @grabarEstudioErrorMicro.
+  ///
+  /// In es, this message translates to:
+  /// **'No se puede usar el micrófono. Dale permiso en los ajustes del móvil y vuelve a intentarlo.'**
+  String get grabarEstudioErrorMicro;
+
+  /// No description provided for @grabarEstudioErrorGuardar.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo guardar la sesión. Comprueba la conexión a internet.'**
+  String get grabarEstudioErrorGuardar;
+
+  /// No description provided for @grabarEstudioSalirTitulo.
+  ///
+  /// In es, this message translates to:
+  /// **'Estás grabando'**
+  String get grabarEstudioSalirTitulo;
+
+  /// No description provided for @grabarEstudioSalirTexto.
+  ///
+  /// In es, this message translates to:
+  /// **'Si sales ahora, terminamos la grabación y guardamos lo que llevas.'**
+  String get grabarEstudioSalirTexto;
+
+  /// No description provided for @grabarEstudioSeguir.
+  ///
+  /// In es, this message translates to:
+  /// **'Seguir grabando'**
+  String get grabarEstudioSeguir;
+
+  /// No description provided for @grabarEstudioGuardarYSalir.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardar y salir'**
+  String get grabarEstudioGuardarYSalir;
 }
 
 class _AppLocalizationsDelegate

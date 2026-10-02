@@ -6,6 +6,7 @@ import '../../models/asignatura.dart';
 import '../../models/curso.dart';
 import '../../services/auth_service.dart';
 import '../../services/db_service.dart';
+import '../../utils/mensaje_error.dart';
 import '../../utils/excel_plantilla_importacion.dart';
 
 /// Volcado masivo de cursos/asignaturas/alumnos desde una plantilla
@@ -93,7 +94,7 @@ class _ImportarDatosScreenState extends State<ImportarDatosScreen> {
         _erroresValidacion = _validar(datos);
       });
     } catch (e) {
-      setState(() => _errorArchivo = 'No se pudo leer el archivo: $e');
+      setState(() => _errorArchivo = mensajeError(e, porDefecto: 'No se pudo leer el archivo. ¿Es la plantilla de Excel descargada desde aquí?'));
     } finally {
       if (mounted) setState(() => _cargandoArchivo = false);
     }
@@ -220,7 +221,7 @@ class _ImportarDatosScreenState extends State<ImportarDatosScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error durante la importación: $e')),
+        SnackBar(content: Text(mensajeError(e, porDefecto: 'La importación se detuvo por un error. Revisa el archivo e inténtalo de nuevo.'))),
       );
     } finally {
       if (mounted) setState(() => _importando = false);

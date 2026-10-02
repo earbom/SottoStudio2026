@@ -12,6 +12,7 @@ import '../models/horario_laboral.dart';
 import '../models/marcaje.dart';
 import '../models/incidencia.dart';
 import '../models/plus_orquesta.dart';
+import '../models/contacto_alumno.dart';
 import '../utils/curso_escolar.dart';
 
 /// Centraliza el acceso a Firestore. Los nombres de colección aquí
@@ -189,11 +190,10 @@ class DbService {
   /// Informe de dirección: horas efectivas del MES ACTUAL por alumno
   /// (las horas objetivo son mensuales, ver CLAUDE.md), ordenadas de
   /// mayor a menor, junto con el objetivo mensual combinado del alumno
-  /// (suma de `horasObjetivoMensual` de los CURSOS DISTINTOS entre sus
-  /// asignaturas con matrícula activa — el objetivo es por curso, no
-  /// por asignatura, así que no se cuenta dos veces si el alumno tiene
-  /// varias asignaturas del mismo curso) para poder colorear en
-  /// rojo/verde en la UI.
+  /// (suma de `Asignatura.horasObjetivoMensual` de sus asignaturas con
+  /// matrícula activa — el objetivo vivía antes en `Curso`, retirado
+  /// de ahí: cada asignatura tiene su propia cantidad de horas, ver
+  /// CLAUDE.md) para poder colorear en rojo/verde en la UI.
   ///
   /// FASE DE PRUEBAS: agrega `sesionesEstudio`/`matriculas`/`asignaturas`
   /// en el propio cliente en vez de leer `estadisticasAlumno`, porque
@@ -218,13 +218,8 @@ class DbService {
       }
 
       final asignaturasSnap = await _db.collection('asignaturas').get();
-      final cursoIdPorAsignatura = {
-        for (final d in asignaturasSnap.docs) d.id: d.data()['cursoId'] as String? ?? ''
-      };
-
-      final cursosSnap = await _db.collection('cursos').get();
-      final objetivoPorCurso = {
-        for (final d in cursosSnap.docs)
+      final objetivoPorAsignatura = {
+        for (final d in asignaturasSnap.docs)
           d.id: (d.data()['horasObjetivoMensual'] as num?)?.toDouble() ?? 0.0
       };
 
@@ -233,19 +228,18 @@ class DbService {
           .where('cursoEscolar', isEqualTo: cursoEscolar)
           .where('activa', isEqualTo: true)
           .get();
-      final cursosPorAlumno = <String, Set<String>>{};
+      final asignaturasPorAlumno = <String, Set<String>>{};
       for (final d in matriculasSnap.docs) {
         final m = d.data();
         final alumnoId = m['alumnoId'] as String? ?? '';
         final asignaturaId = m['asignaturaId'] as String? ?? '';
-        final cursoId = cursoIdPorAsignatura[asignaturaId] ?? '';
-        if (cursoId.isEmpty) continue;
-        (cursosPorAlumno[alumnoId] ??= {}).add(cursoId);
+        if (asignaturaId.isEmpty) continue;
+        (asignaturasPorAlumno[alumnoId] ??= {}).add(asignaturaId);
       }
       final objetivoPorAlumno = {
-        for (final entry in cursosPorAlumno.entries)
-          entry.key: entry.value
-              .fold<double>(0, (acc, cursoId) => acc + (objetivoPorCurso[cursoId] ?? 0))
+        for (final entry in asignaturasPorAlumno.entries)
+          entry.key: entry.value.fold<double>(
+              0, (acc, asignaturaId) => acc + (objetivoPorAsignatura[asignaturaId] ?? 0))
       };
 
       final alumnosIds = {...msEfectivoMesPorAlumno.keys, ...objetivoPorAlumno.keys};
@@ -386,6 +380,17 @@ class DbService {
     await _db.collection('notas').add(nota.toMap());
   }
 
+  /// Corregir una nota mal puesta. Las reglas solo lo permiten a
+  /// dirección o al profesor que la puso mientras siga pendiente.
+  Future<void> actualizarNota(String notaId, {required double valor, required String comentario}) {
+    return _db.collection('notas').doc(notaId).update({'valor': valor, 'comentario': comentario});
+  }
+
+  /// Borrar una nota puesta por error (mismas condiciones que editar).
+  Future<void> eliminarNota(String notaId) {
+    return _db.collection('notas').doc(notaId).delete();
+  }
+
   Stream<List<Nota>> notasDeAlumno(String alumnoId) {
     return _db
         .collection('notas')
@@ -511,28 +516,30 @@ class DbService {
   /// (ver `CuerpoHorasAsignatura`). No son sesiones reales, es un
   /// extra fijo mientras la matrícula con el plus siga activa; se suma
   /// aparte en cada pantalla de horas de estudio, no se persiste como
-  /// `sesionesEstudio`.
-  Future<List<({double horasSemana, DateTime desde})>> plusesOrquestaAplicablesDeAlumno({
+  /// `sesionesEstudio`. En MINUTOS (como `PlusOrquesta.minutosSemana`),
+  /// no horas — quien consuma esto convierte según necesite.
+  Future<List<({int minutosSemana, DateTime desde})>> plusesOrquestaAplicablesDeAlumno({
     required String alumnoId,
     required String asignaturaDestinoId,
     required String cursoEscolar,
   }) async {
     final matriculas = await matriculasDeAlumno(alumnoId, cursoEscolar: cursoEscolar).first;
-    final resultado = <({double horasSemana, DateTime desde})>[];
+    final resultado = <({int minutosSemana, DateTime desde})>[];
     for (final m in matriculas) {
       if (m.plusOrquestaId.isEmpty) continue;
       final plus = await plusOrquesta(m.plusOrquestaId);
       if (plus != null && plus.asignaturaDestinoId == asignaturaDestinoId) {
-        resultado.add((horasSemana: plus.horasSemana, desde: m.fechaAlta));
+        resultado.add((minutosSemana: plus.minutosSemana, desde: m.fechaAlta));
       }
     }
     return resultado;
   }
 
-  /// Suma de horas/semana de los pluses aplicables — para la SEMANA
-  /// actual, donde no hace falta distinguir desde cuándo (si la
-  /// matrícula empezó esta misma semana, se cuenta igual completa,
-  /// aproximación aceptada). Ver `plusesOrquestaAplicablesDeAlumno`.
+  /// Suma en HORAS de los pluses aplicables (convertido desde minutos)
+  /// — para la SEMANA actual, donde no hace falta distinguir desde
+  /// cuándo (si la matrícula empezó esta misma semana, se cuenta igual
+  /// completa, aproximación aceptada). Ver
+  /// `plusesOrquestaAplicablesDeAlumno`.
   Future<double> horasPlusOrquestaSemanalDeAlumno({
     required String alumnoId,
     required String asignaturaDestinoId,
@@ -540,7 +547,7 @@ class DbService {
   }) async {
     final pluses = await plusesOrquestaAplicablesDeAlumno(
         alumnoId: alumnoId, asignaturaDestinoId: asignaturaDestinoId, cursoEscolar: cursoEscolar);
-    return pluses.fold<double>(0, (acc, p) => acc + p.horasSemana);
+    return pluses.fold<double>(0, (acc, p) => acc + p.minutosSemana / 60.0);
   }
 
   // -------------------------------------------------------------
@@ -549,20 +556,81 @@ class DbService {
   // Piloto de un solo centro: sin filtro por centroId (ver CLAUDE.md,
   // backlog de multi-centro). Un solo filtro arrayContains, sin
   // necesidad de índice compuesto.
-  Stream<List<Usuario>> alumnosDelCentro() {
+  // Los dados de baja (`activo == false`) se filtran en cliente y no
+  // con un where: los documentos antiguos no tienen el campo, y un
+  // where('activo', isEqualTo: true) los dejaría fuera.
+  Stream<List<Usuario>> _usuariosConPermiso(String permiso, {required bool activos}) {
     return _db
         .collection('usuarios')
-        .where('permisos', arrayContains: 'alumno')
+        .where('permisos', arrayContains: permiso)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => Usuario.fromMap(d.id, d.data())).toList());
+        .map((snap) => snap.docs
+            .map((d) => Usuario.fromMap(d.id, d.data()))
+            .where((u) => u.activo == activos)
+            .toList());
   }
 
-  Stream<List<Usuario>> profesoresDelCentro() {
-    return _db
-        .collection('usuarios')
-        .where('permisos', arrayContains: 'profesor')
-        .snapshots()
-        .map((snap) => snap.docs.map((d) => Usuario.fromMap(d.id, d.data())).toList());
+  Stream<List<Usuario>> alumnosDelCentro() => _usuariosConPermiso('alumno', activos: true);
+
+  Stream<List<Usuario>> profesoresDelCentro() => _usuariosConPermiso('profesor', activos: true);
+
+  Stream<List<Usuario>> alumnosDadosDeBaja() => _usuariosConPermiso('alumno', activos: false);
+
+  Stream<List<Usuario>> profesoresDadosDeBaja() => _usuariosConPermiso('profesor', activos: false);
+
+  /// Contacto de la familia (solo dirección, ver ContactoAlumno). Un
+  /// get() de un doc que aún no existe es el caso normal (ver reglas).
+  Future<ContactoAlumno> contactoAlumno(String alumnoId) async {
+    final doc = await _db.collection('contactosAlumno').doc(alumnoId).get();
+    return doc.exists
+        ? ContactoAlumno.fromMap(alumnoId, doc.data()!)
+        : ContactoAlumno(alumnoId: alumnoId);
+  }
+
+  Future<void> guardarContactoAlumno(ContactoAlumno contacto) {
+    return _db.collection('contactosAlumno').doc(contacto.alumnoId).set(contacto.toMap());
+  }
+
+  /// Datos personales editables por dirección. El email de acceso NO se
+  /// puede cambiar desde la app (Firebase Auth solo deja cambiar el de
+  /// otra persona con Admin SDK, es decir, con Cloud Functions/Blaze).
+  Future<void> actualizarDatosUsuario(
+    String uid, {
+    required String nombre,
+    String? apellidos,
+    String? instrumento,
+  }) {
+    return _db.collection('usuarios').doc(uid).update({
+      'nombre': nombre,
+      'apellidos': apellidos,
+      'instrumento': instrumento,
+    });
+  }
+
+  /// Baja del centro: marca `activo: false` (las reglas le retiran
+  /// todos los permisos) y desactiva todas sus matrículas activas. No
+  /// borra nada — notas, asistencias, horas y fichajes se conservan.
+  Future<void> darDeBajaUsuario(String uid) async {
+    final batch = _db.batch();
+    batch.update(_db.collection('usuarios').doc(uid), {
+      'activo': false,
+      'bajaEn': DateTime.now().toIso8601String(),
+    });
+    final matriculas = await _db
+        .collection('matriculas')
+        .where('alumnoId', isEqualTo: uid)
+        .where('activa', isEqualTo: true)
+        .get();
+    for (final d in matriculas.docs) {
+      batch.update(d.reference, {'activa': false});
+    }
+    await batch.commit();
+  }
+
+  /// Vuelve a dar acceso. Las matrículas que se desactivaron con la baja
+  /// NO se recuperan solas: hay que volver a matricularlo.
+  Future<void> reactivarUsuario(String uid) {
+    return _db.collection('usuarios').doc(uid).update({'activo': true, 'bajaEn': null});
   }
 
   Future<Usuario?> obtenerUsuario(String uid) async {
@@ -735,6 +803,103 @@ class DbService {
     }
   }
 
+  /// Asigna una franja horaria de GRUPO (ver CLAUDE.md punto 69,
+  /// `FranjaHoraria`) a la matrícula de UN alumno: copia sus
+  /// días/hora a los campos que lee el horario general
+  /// (`Matricula.diasSemana`/`horaInicio`/`horaFin`) y guarda
+  /// `franjaHorarioId` para poder re-sincronizar si la franja cambia
+  /// después. `franja == null` quita la franja asignada (vuelve a
+  /// horario individual sin definir).
+  Future<void> asignarFranjaMatricula({
+    required String alumnoId,
+    required String asignaturaId,
+    required String cursoEscolar,
+    FranjaHoraria? franja,
+  }) {
+    final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
+    return _db.collection('matriculas').doc(id).update({
+      'franjaHorarioId': franja?.id ?? '',
+      'diasSemana': franja?.diasSemana ?? const [],
+      'horaInicio': franja?.horaInicio ?? '',
+      'horaFin': franja?.horaFin ?? '',
+    });
+  }
+
+  /// Re-sincroniza las matrículas que ya tenían asignada esta franja
+  /// (`franjaHorarioId == franja.id`) tras editarla desde
+  /// `CursoDetalleScreen` — para que cambiar los días/hora de un grupo
+  /// también actualice a los alumnos ya matriculados en él, no solo a
+  /// los nuevos. Un solo `WriteBatch`, igual que
+  /// `asignarProfesorAAsignatura` y similares.
+  Future<void> sincronizarFranjaHoraria({
+    required String asignaturaId,
+    required String cursoEscolar,
+    required FranjaHoraria franja,
+  }) async {
+    final matriculas = await matriculasDeAsignatura(asignaturaId, cursoEscolar: cursoEscolar).first;
+    final afectadas = matriculas.where((m) => m.franjaHorarioId == franja.id).toList();
+    if (afectadas.isEmpty) return;
+    final batch = _db.batch();
+    for (final m in afectadas) {
+      batch.update(_db.collection('matriculas').doc(m.id), {
+        'diasSemana': franja.diasSemana,
+        'horaInicio': franja.horaInicio,
+        'horaFin': franja.horaFin,
+      });
+    }
+    await batch.commit();
+  }
+
+  /// Asigna una franja de golpe a VARIOS alumnos ya matriculados (ver
+  /// CLAUDE.md): crear/editar franjas en la asignatura no vincula sola
+  /// a los alumnos que ya estaban matriculados de antes de que
+  /// existiera esa franja — hay que asignarla explícitamente. Pensado
+  /// para dirección al añadir la primera franja a una asignatura que
+  /// ya tenía roster, para no tener que editar matrícula por matrícula.
+  Future<void> asignarFranjaAMatriculas({
+    required String asignaturaId,
+    required String cursoEscolar,
+    required List<String> alumnoIds,
+    required FranjaHoraria franja,
+  }) async {
+    if (alumnoIds.isEmpty) return;
+    final batch = _db.batch();
+    for (final alumnoId in alumnoIds) {
+      final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
+      batch.update(_db.collection('matriculas').doc(id), {
+        'franjaHorarioId': franja.id,
+        'diasSemana': franja.diasSemana,
+        'horaInicio': franja.horaInicio,
+        'horaFin': franja.horaFin,
+      });
+    }
+    await batch.commit();
+  }
+
+  /// Al borrar una franja horaria de la asignatura, las matrículas que
+  /// la tenían asignada se quedan sin horario (no tiene sentido dejar
+  /// un `diasSemana`/`horaInicio`/`horaFin` "fantasma" de una franja
+  /// que ya no existe) — dirección tendrá que asignarles otra.
+  Future<void> limpiarFranjaDeMatriculas({
+    required String asignaturaId,
+    required String cursoEscolar,
+    required String franjaId,
+  }) async {
+    final matriculas = await matriculasDeAsignatura(asignaturaId, cursoEscolar: cursoEscolar).first;
+    final afectadas = matriculas.where((m) => m.franjaHorarioId == franjaId).toList();
+    if (afectadas.isEmpty) return;
+    final batch = _db.batch();
+    for (final m in afectadas) {
+      batch.update(_db.collection('matriculas').doc(m.id), {
+        'franjaHorarioId': '',
+        'diasSemana': const [],
+        'horaInicio': '',
+        'horaFin': '',
+      });
+    }
+    await batch.commit();
+  }
+
   /// Solo se puede eliminar una asignatura sin alumnos matriculados
   /// (activos) EN NINGÚN curso escolar, para no perder el historial de
   /// sesiones/notas/asistencias que siguen referenciando esa
@@ -801,6 +966,30 @@ class DbService {
     });
   }
 
+  /// Lo que un profesor ve en "Mis asignaturas": las suyas (cross-curso,
+  /// ver arriba) MÁS las que cubre HOY como sustituto aunque no las dé
+  /// normalmente — si no, un sustituto de otra materia no tenía forma
+  /// de llegar a la lista para pasar asistencia. Solo hoy: las reglas
+  /// solo le dejan leer la lista de alumnos el día de la sustitución.
+  Stream<List<Asignatura>> asignaturasVisiblesParaProfesor(String profesorUid) {
+    return asignaturasDeProfesorCrossCurso(profesorUid).asyncMap((propias) async {
+      final sustituciones = await _db
+          .collection('sustituciones')
+          .where('profesorId', isEqualTo: profesorUid)
+          .where('fecha', isEqualTo: Sustitucion.formatearFecha(DateTime.now()))
+          .get();
+      final idsPropias = propias.map((a) => a.id).toSet();
+      final extra = <Asignatura>[];
+      for (final d in sustituciones.docs) {
+        final id = d.data()['asignaturaId'] as String? ?? '';
+        if (id.isEmpty || idsPropias.contains(id)) continue;
+        final asignatura = await this.asignatura(id);
+        if (asignatura != null) extra.add(asignatura);
+      }
+      return [...propias, ...extra];
+    });
+  }
+
   Stream<List<Asignatura>> todasLasAsignaturas() {
     return _db
         .collection('asignaturas')
@@ -841,6 +1030,7 @@ class DbService {
     String plusOrquestaId = '',
     String horaInicio = '',
     String horaFin = '',
+    String franjaHorarioId = '',
   }) {
     final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
     final matricula = Matricula(
@@ -854,6 +1044,7 @@ class DbService {
       plusOrquestaId: plusOrquestaId,
       horaInicio: horaInicio,
       horaFin: horaFin,
+      franjaHorarioId: franjaHorarioId,
     );
     return _db.collection('matriculas').doc(id).set(matricula.toMap(), SetOptions(merge: true));
   }
@@ -868,6 +1059,55 @@ class DbService {
   }) {
     final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
     return _db.collection('matriculas').doc(id).update({'horaInicio': horaInicio, 'horaFin': horaFin});
+  }
+
+  /// Franja de grupo elegida para esta matrícula ('' = ninguna) — ver
+  /// CLAUDE.md punto 69. Guarda solo la referencia; los días/hora
+  /// copiados van aparte por `actualizarDiasClaseMatricula`/
+  /// `actualizarHorarioMatricula` (llamados junto a este desde
+  /// `_editarMatricula`).
+  Future<void> actualizarFranjaHorarioIdMatricula({
+    required String alumnoId,
+    required String asignaturaId,
+    required String cursoEscolar,
+    required String franjaHorarioId,
+  }) {
+    final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
+    return _db.collection('matriculas').doc(id).update({'franjaHorarioId': franjaHorarioId});
+  }
+
+  /// Mueve UNA ocurrencia de clase (un día concreto de una matrícula) a
+  /// otro día/hora — usado por arrastrar-soltar en `HorarioGeneralScreen`
+  /// (ver CLAUDE.md: MVP deliberado SIN detección de conflictos, soltar
+  /// sobre una celda ya ocupada simplemente añade otra clase ahí). Si el
+  /// alumno tenía más días además del de origen, se conservan tal cual
+  /// —solo se sustituye el día arrastrado por el de destino—, pero
+  /// TODOS comparten la misma franja horaria (ver `Matricula.horaInicio`/
+  /// `horaFin`), así que mover a una hora distinta también cambia la
+  /// hora del resto de días. Se desvincula de cualquier franja de grupo
+  /// que tuviera (`franjaHorarioId` = ''), porque su horario ya puede no
+  /// coincidir con el resto del grupo — si se quiere podar el vínculo,
+  /// dirección puede reasignarle una franja de nuevo desde la matrícula.
+  Future<void> moverOcurrenciaHorario({
+    required String alumnoId,
+    required String asignaturaId,
+    required String cursoEscolar,
+    required int diaOrigen,
+    required int diaDestino,
+    required String horaInicioDestino,
+    required String horaFinDestino,
+  }) async {
+    final id = Matricula.idPara(alumnoId: alumnoId, asignaturaId: asignaturaId, cursoEscolar: cursoEscolar);
+    final doc = await _db.collection('matriculas').doc(id).get();
+    if (!doc.exists) return;
+    final matricula = Matricula.fromMap(doc.id, doc.data()!);
+    final nuevosDias = {...matricula.diasSemana.where((d) => d != diaOrigen), diaDestino}.toList()..sort();
+    await _db.collection('matriculas').doc(id).update({
+      'diasSemana': nuevosDias,
+      'horaInicio': horaInicioDestino,
+      'horaFin': horaFinDestino,
+      'franjaHorarioId': '',
+    });
   }
 
   /// Plus de orquesta aplicado a esta matrícula ('' = ninguno) — ver
@@ -956,6 +1196,99 @@ class DbService {
       resultado.addAll(matriculas);
     }
     return resultado;
+  }
+
+  /// Días de clase de los últimos [diasAtras] días (incluido hoy) sin
+  /// asistencia marcada, para dirección. Una sola consulta de
+  /// asistencias por rango de fecha en vez de una lectura por
+  /// alumno·asignatura·día (antes tardaba mucho con muchos alumnos).
+  Future<List<({Matricula matricula, DateTime fecha})>> asistenciasSinMarcar({int diasAtras = 7}) async {
+    final cursoEscolar = await cursoEscolarActivo().first;
+    final matriculas = await todasLasMatriculasActivas(cursoEscolar: cursoEscolar).first;
+    final hoy = DateTime.now();
+    final hoySoloFecha = DateTime(hoy.year, hoy.month, hoy.day);
+    final desde = hoySoloFecha.subtract(Duration(days: diasAtras - 1));
+    final marcadas = await _db
+        .collection('asistencias')
+        .where('fecha', isGreaterThanOrEqualTo: Asistencia.formatearFecha(desde))
+        .get();
+    final clavesMarcadas = {
+      for (final d in marcadas.docs) '${d.data()['alumnoId']}_${d.data()['asignaturaId']}_${d.data()['fecha']}'
+    };
+    final pendientes = <({Matricula matricula, DateTime fecha})>[];
+    for (final m in matriculas) {
+      if (m.diasSemana.isEmpty) continue;
+      final alta = DateTime(m.fechaAlta.year, m.fechaAlta.month, m.fechaAlta.day);
+      for (var i = 0; i < diasAtras; i++) {
+        final dia = hoySoloFecha.subtract(Duration(days: i));
+        if (dia.isBefore(alta) || !m.diasSemana.contains(dia.weekday)) continue;
+        if (!clavesMarcadas.contains('${m.alumnoId}_${m.asignaturaId}_${Asistencia.formatearFecha(dia)}')) {
+          pendientes.add((matricula: m, fecha: dia));
+        }
+      }
+    }
+    pendientes.sort((a, b) => b.fecha.compareTo(a.fecha));
+    return pendientes;
+  }
+
+  /// Notas FINALES listas para que dirección las valide: un grupo
+  /// alumno·asignatura con alguna nota pendiente y nota en TODOS los
+  /// criterios de la asignatura (ver CLAUDE.md punto 59). La nota final
+  /// usa la más reciente de cada criterio. Los grupos incompletos se
+  /// devuelven aparte (solo el recuento), para poder explicar por qué
+  /// no aparecen todavía.
+  Future<({List<({String alumnoId, String asignaturaId, List<String> notaIds, double notaFinal})> listas, int incompletas})>
+      notasFinalesPorValidar() async {
+    final pendientes = await notasPendientesSupervision().first;
+    final grupos = <String, List<Nota>>{};
+    for (final n in pendientes) {
+      (grupos['${n.alumnoId}_${n.asignaturaId}'] ??= []).add(n);
+    }
+    final criteriosCache = <String, List<CriterioEvaluacion>>{};
+    final notasAlumnoCache = <String, List<Nota>>{};
+    final listas = <({String alumnoId, String asignaturaId, List<String> notaIds, double notaFinal})>[];
+    var incompletas = 0;
+    for (final grupo in grupos.values) {
+      final alumnoId = grupo.first.alumnoId;
+      final asignaturaId = grupo.first.asignaturaId;
+      final criterios = criteriosCache[asignaturaId] ??= await criteriosDeAsignatura(asignaturaId).first;
+      if (criterios.isEmpty) {
+        incompletas++;
+        continue;
+      }
+      final notas = (notasAlumnoCache[alumnoId] ??= await notasDeAlumno(alumnoId).first)
+          .where((n) => n.asignaturaId == asignaturaId)
+          .toList();
+      final cubiertos = notas.map((n) => n.criterioId).toSet();
+      if (!criterios.every((c) => cubiertos.contains(c.id))) {
+        incompletas++;
+        continue;
+      }
+      final masReciente = <String, Nota>{};
+      for (final n in notas) {
+        final actual = masReciente[n.criterioId];
+        if (actual == null || n.fecha.isAfter(actual.fecha)) masReciente[n.criterioId] = n;
+      }
+      final pesoPorId = {for (final c in criterios) c.id!: c.peso};
+      final notaFinal = masReciente.values
+          .fold<double>(0, (acc, n) => acc + n.valor * (pesoPorId[n.criterioId] ?? 0) / 100);
+      listas.add((
+        alumnoId: alumnoId,
+        asignaturaId: asignaturaId,
+        notaIds: grupo.map((n) => n.id!).toList(),
+        notaFinal: notaFinal,
+      ));
+    }
+    return (listas: listas, incompletas: incompletas);
+  }
+
+  /// Fichajes autoinformados pendientes de que dirección los valide.
+  Stream<int> numeroMarcajesPendientesValidacion() {
+    return _db
+        .collection('marcajes')
+        .where('pendienteValidacion', isEqualTo: true)
+        .snapshots()
+        .map((snap) => snap.docs.length);
   }
 
   Stream<List<Matricula>> todasLasMatriculasActivas({required String cursoEscolar}) {

@@ -87,7 +87,9 @@ class _SustitucionesScreenState extends State<SustitucionesScreen> {
             ),
           ),
           TableCalendar(
-            headerStyle: const HeaderStyle(formatButtonVisible: false),
+            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+            locale: Localizations.localeOf(context).toLanguageTag(),
+            startingDayOfWeek: StartingDayOfWeek.monday,
             firstDay: DateTime.now().subtract(const Duration(days: 30)),
             lastDay: DateTime.now().add(const Duration(days: 180)),
             focusedDay: _diaEnfocado,
@@ -149,14 +151,34 @@ class _SustitucionesScreenState extends State<SustitucionesScreen> {
                       return ListTile(
                         leading: const Icon(Icons.swap_horiz),
                         title: Text(nombre),
-                        subtitle: Text(s.fecha),
+                        subtitle: Text(_formatoFecha.format(DateTime.parse(s.fecha))),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _db.eliminarSustitucion(
-                            asignaturaId: s.asignaturaId,
-                            profesorId: s.profesorId,
-                            fecha: DateTime.parse(s.fecha),
-                          ),
+                          tooltip: 'Anular sustitución',
+                          onPressed: () async {
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Anular sustitución'),
+                                content: Text(
+                                    '¿Anular la sustitución de $nombre el ${_formatoFecha.format(DateTime.parse(s.fecha))}?'),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(context, false),
+                                      child: const Text('Cancelar')),
+                                  FilledButton(
+                                      onPressed: () => Navigator.pop(context, true),
+                                      child: const Text('Anular')),
+                                ],
+                              ),
+                            );
+                            if (ok != true) return;
+                            await _db.eliminarSustitucion(
+                              asignaturaId: s.asignaturaId,
+                              profesorId: s.profesorId,
+                              fecha: DateTime.parse(s.fecha),
+                            );
+                          },
                         ),
                       );
                     },

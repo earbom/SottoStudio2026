@@ -3,7 +3,14 @@ import '../utils/curso_escolar.dart';
 
 final _formatoFechaDia = DateFormat('yyyy-MM-dd');
 
+// Dirección solo VALIDA la nota final (un único botón): se guarda como
+// `supervisada`. `corregida` queda por compatibilidad con notas
+// antiguas y se muestra igual, como validada.
 enum EstadoNota { pendiente, supervisada, corregida }
+
+extension EtiquetaEstadoNota on EstadoNota {
+  String get etiqueta => this == EstadoNota.pendiente ? 'Pendiente de validar' : 'Validada por dirección';
+}
 
 EstadoNota estadoNotaDesdeTexto(String texto) {
   switch (texto) {

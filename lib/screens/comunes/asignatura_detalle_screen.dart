@@ -7,10 +7,14 @@ import '../../models/plus_orquesta.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
 import '../../widgets/selector_curso_escolar.dart';
+import '../../widgets/campo_busqueda.dart';
 import '../direccion/criterios_evaluacion_screen.dart';
+import '../direccion/formulario_asignatura.dart';
 import '../direccion/sustituciones_screen.dart';
 import 'alumno_en_asignatura_screen.dart';
 import 'horas_asignatura_screen.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
 import 'notas_asignatura_grid_screen.dart';
 
 const nombresDiasSemana = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -23,8 +27,23 @@ const nombresDiasSemana = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 /// CUALQUIER profesor de la asignatura (de cualquier curso que
 /// comparta nombre) puede poner notas o marcar asistencia de
 /// cualquier alumno, no solo el aquí asignado.
-Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaInicio, String horaFin})?>
-    _configurarMatricula(
+///
+/// `franjasDisponibles` (no vacío cuando `Asignatura.franjasHorario`
+/// tiene alguna, ver CLAUDE.md punto 69): asignaturas NO instrumentales
+/// pueden tener varios grupos a días/horas distintos, configurados
+/// desde la propia asignatura (`CursoDetalleScreen`) — aquí solo se
+/// ELIGE a cuál pertenece este alumno, no se editan días/hora sueltos.
+/// Con la lista vacía (caso normal de instrumento), el diálogo pide
+/// días/hora individuales como siempre.
+Future<
+    ({
+      List<int> dias,
+      String profesorId,
+      String plusOrquestaId,
+      String horaInicio,
+      String horaFin,
+      String franjaHorarioId,
+    })?> _configurarMatricula(
   BuildContext context, {
   required List<Usuario> profesoresDeLaAsignatura,
   required List<PlusOrquesta> plusesDisponibles,
@@ -33,12 +52,15 @@ Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaIn
   String plusOrquestaIdInicial = '',
   String horaInicioInicial = '',
   String horaFinInicial = '',
+  List<FranjaHoraria> franjasDisponibles = const [],
+  String franjaHorarioIdInicial = '',
 }) {
   final seleccionados = diasIniciales.toSet();
   String profesorId = profesorIdInicial;
   String plusOrquestaId = plusOrquestaIdInicial;
   String horaInicio = horaInicioInicial;
   String horaFin = horaFinInicial;
+  String franjaHorarioId = franjaHorarioIdInicial;
 
   Future<void> elegirHora(
       BuildContext context, void Function(String) onElegida, String actual) async {
@@ -52,7 +74,15 @@ Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaIn
         '${elegida.hour.toString().padLeft(2, '0')}:${elegida.minute.toString().padLeft(2, '0')}');
   }
 
-  return showDialog<({List<int> dias, String profesorId, String plusOrquestaId, String horaInicio, String horaFin})>(
+  return showDialog<
+      ({
+        List<int> dias,
+        String profesorId,
+        String plusOrquestaId,
+        String horaInicio,
+        String horaFin,
+        String franjaHorarioId,
+      })>(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setStateDialog) => AlertDialog(
@@ -62,45 +92,61 @@ Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaIn
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Días de clase'),
-              Wrap(
-                spacing: 6,
-                children: List.generate(7, (i) {
-                  final dia = i + 1;
-                  return FilterChip(
-                    label: Text(nombresDiasSemana[i]),
-                    selected: seleccionados.contains(dia),
-                    onSelected: (v) => setStateDialog(() {
-                      v ? seleccionados.add(dia) : seleccionados.remove(dia);
-                    }),
-                  );
-                }),
-              ),
-              const SizedBox(height: 16),
-              const Text('Horario (misma franja todos los días de clase elegidos)'),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => elegirHora(
-                          context, (h) => setStateDialog(() => horaInicio = h), horaInicio),
-                      child: Text(horaInicio.isEmpty ? 'Hora inicio' : horaInicio),
+              if (franjasDisponibles.isNotEmpty) ...[
+                const Text('Grupo de clase'),
+                const SizedBox(height: 4),
+                DropdownButtonFormField<String>(
+                  initialValue: franjaHorarioId.isEmpty ? null : franjaHorarioId,
+                  hint: const Text('Elige un grupo'),
+                  items: franjasDisponibles
+                      .map((f) => DropdownMenuItem(
+                            value: f.id,
+                            child: Text(
+                                '${f.diasSemana.map((d) => nombresDiasSemana[d - 1]).join(', ')} · ${f.horaInicio} - ${f.horaFin}'),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setStateDialog(() => franjaHorarioId = v ?? ''),
+                ),
+              ] else ...[
+                const Text('Días de clase'),
+                Wrap(
+                  spacing: 6,
+                  children: List.generate(7, (i) {
+                    final dia = i + 1;
+                    return FilterChip(
+                      label: Text(nombresDiasSemana[i]),
+                      selected: seleccionados.contains(dia),
+                      onSelected: (v) => setStateDialog(() {
+                        v ? seleccionados.add(dia) : seleccionados.remove(dia);
+                      }),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 16),
+                const Text('Horario (misma franja todos los días de clase elegidos)'),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => elegirHora(
+                            context, (h) => setStateDialog(() => horaInicio = h), horaInicio),
+                        child: Text(horaInicio.isEmpty ? 'Hora inicio' : horaInicio),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () =>
-                          elegirHora(context, (h) => setStateDialog(() => horaFin = h), horaFin),
-                      child: Text(horaFin.isEmpty ? 'Hora fin' : horaFin),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            elegirHora(context, (h) => setStateDialog(() => horaFin = h), horaFin),
+                        child: Text(horaFin.isEmpty ? 'Hora fin' : horaFin),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
-              const Text(
-                  'Profesor de referencia (informativo — ya no restringe quién puede puntuar)'),
+              const Text('Profesor habitual'),
               if (profesoresDeLaAsignatura.isEmpty)
                 const Text('Esta asignatura no tiene profesores todavía.',
                     style: TextStyle(fontStyle: FontStyle.italic))
@@ -116,14 +162,14 @@ Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaIn
                 ),
               if (plusesDisponibles.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text('Plus de orquesta (suma horas extra a otra asignatura)'),
+                const Text('Plus de orquesta (suma tiempo de estudio a otra asignatura)'),
                 DropdownButtonFormField<String>(
                   initialValue: plusOrquestaId.isEmpty ? null : plusOrquestaId,
                   hint: const Text('Ninguno'),
                   items: plusesDisponibles
                       .map((p) => DropdownMenuItem(
                           value: p.id,
-                          child: Text('${p.nombre} (+${p.horasSemana.toStringAsFixed(1)} h/sem)')))
+                          child: Text('${p.nombre} (+${p.minutosSemana} min/sem)')))
                       .toList(),
                   onChanged: (v) => setStateDialog(() => plusOrquestaId = v ?? ''),
                 ),
@@ -136,21 +182,83 @@ Future<({List<int> dias, String profesorId, String plusOrquestaId, String horaIn
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancelar')),
           FilledButton(
-            onPressed: () => Navigator.pop(
-                context,
-                (
-                  dias: seleccionados.toList()..sort(),
-                  profesorId: profesorId,
-                  plusOrquestaId: plusOrquestaId,
-                  horaInicio: horaInicio,
-                  horaFin: horaFin,
-                )),
+            onPressed: () {
+              if (franjasDisponibles.isEmpty) {
+                Navigator.pop(
+                    context,
+                    (
+                      dias: seleccionados.toList()..sort(),
+                      profesorId: profesorId,
+                      plusOrquestaId: plusOrquestaId,
+                      horaInicio: horaInicio,
+                      horaFin: horaFin,
+                      franjaHorarioId: '',
+                    ));
+                return;
+              }
+              final elegidas =
+                  franjasDisponibles.where((f) => f.id == franjaHorarioId).toList();
+              final franja = elegidas.isEmpty ? null : elegidas.first;
+              Navigator.pop(
+                  context,
+                  (
+                    dias: franja?.diasSemana ?? const <int>[],
+                    profesorId: profesorId,
+                    plusOrquestaId: plusOrquestaId,
+                    horaInicio: franja?.horaInicio ?? '',
+                    horaFin: franja?.horaFin ?? '',
+                    franjaHorarioId: franjaHorarioId,
+                  ));
+            },
             child: const Text('Guardar'),
           ),
         ],
       ),
     ),
   );
+}
+
+/// Pide días/hora (o grupo), profesor habitual y plus, y matricula al
+/// alumno en la asignatura en el curso escolar activo. Compartido entre
+/// la ficha de la asignatura y la ficha del alumno (matricular desde
+/// cualquiera de los dos lados). Devuelve true si se matriculó.
+Future<bool> configurarYMatricular(
+  BuildContext context, {
+  required Usuario alumno,
+  required Asignatura asignatura,
+}) async {
+  final db = DbService();
+  final cursoEscolar = await db.cursoEscolarActivo().first;
+  final todosProfesores = await db.profesoresDelCentro().first;
+  final profesores = todosProfesores.where((p) => asignatura.profesorIds.contains(p.uid)).toList();
+  final pluses = await db.plusesOrquesta().first;
+  if (!context.mounted) return false;
+  final config = await _configurarMatricula(context,
+      profesoresDeLaAsignatura: profesores,
+      plusesDisponibles: pluses,
+      franjasDisponibles: asignatura.franjasHorario);
+  if (config == null || !context.mounted) return false;
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await db.matricular(
+      alumnoId: alumno.uid,
+      asignaturaId: asignatura.id!,
+      cursoId: asignatura.cursoId,
+      cursoEscolar: cursoEscolar,
+      diasSemana: config.dias,
+      profesorId: config.profesorId,
+      plusOrquestaId: config.plusOrquestaId,
+      horaInicio: config.horaInicio,
+      horaFin: config.horaFin,
+      franjaHorarioId: config.franjaHorarioId,
+    );
+    messenger.showSnackBar(SnackBar(content: Text('${alumno.nombre} matriculado en ${asignatura.nombre}.')));
+    return true;
+  } catch (e) {
+    messenger.showSnackBar(
+        SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo matricular. Inténtalo de nuevo.'))));
+    return false;
+  }
 }
 
 /// Pantalla compartida entre dirección y profesor: matriculados de la
@@ -169,12 +277,21 @@ class AsignaturaDetalleScreen extends StatefulWidget {
 
 class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
   final DbService _db = DbService();
+  // Copia local: tras editar la asignatura desde esta misma pantalla se
+  // recarga, para que nombre/grupos horarios mostrados no queden viejos.
+  late Asignatura _asignatura = widget.asignatura;
   bool _sustitucionHoy = false;
   bool _cargandoSustitucion = true;
   // null = ver el curso escolar activo. Solo se puede matricular/editar/
   // marcar asistencia cuando se está viendo el activo — un curso pasado
   // es solo consulta (ver CLAUDE.md, discriminación por curso escolar).
   String? _cursoSeleccionado;
+
+  // Franjas horarias de grupo de la asignatura (ver CLAUDE.md punto
+  // 69) — no vacía cuando hay alguna configurada, en cuyo caso
+  // _configurarMatricula deja de pedir días/hora sueltos y pide elegir
+  // una de estas franjas.
+  List<FranjaHoraria> get _franjasDisponibles => _asignatura.franjasHorario;
 
   @override
   void initState() {
@@ -214,7 +331,7 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
       return;
     }
     final tiene = await _db.tieneSustitucionEnFecha(
-      asignaturaId: widget.asignatura.id!,
+      asignaturaId: _asignatura.id!,
       profesorId: widget.perfil.uid,
       fecha: DateTime.now(),
     );
@@ -228,7 +345,7 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
   Future<List<Usuario>> _profesoresDeLaAsignatura() async {
     final todos = await _db.profesoresDelCentro().first;
     return todos
-        .where((p) => widget.asignatura.profesorIds.contains(p.uid))
+        .where((p) => _asignatura.profesorIds.contains(p.uid))
         .toList();
   }
 
@@ -236,17 +353,18 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
     final cursoEscolar = await _db.cursoEscolarActivo().first;
     final todosLosAlumnos = await _db.alumnosDelCentro().first;
     final matriculasActuales = await _db
-        .matriculasDeAsignatura(widget.asignatura.id!,
+        .matriculasDeAsignatura(_asignatura.id!,
             cursoEscolar: cursoEscolar)
         .first;
-    final profesores = await _profesoresDeLaAsignatura();
-    final pluses = await _db.plusesOrquesta().first;
     if (!mounted) return;
 
     final idsYaMatriculados = matriculasActuales.map((m) => m.alumnoId).toSet();
+    String etiqueta(Usuario a) =>
+        (a.apellidos?.isNotEmpty ?? false) ? '${a.apellidos}, ${a.nombre}' : a.nombre;
     final disponibles = todosLosAlumnos
         .where((a) => !idsYaMatriculados.contains(a.uid))
-        .toList();
+        .toList()
+      ..sort((a, b) => etiqueta(a).toLowerCase().compareTo(etiqueta(b).toLowerCase()));
 
     if (disponibles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -259,41 +377,13 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
 
     final elegido = await showDialog<Usuario>(
       context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Matricular alumno'),
-        children: disponibles
-            .map((a) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(context, a),
-                  child: Text(a.nombre),
-                ))
-            .toList(),
-      ),
+      builder: (context) => _DialogoElegirAlumno(alumnos: disponibles, etiqueta: etiqueta),
     );
 
     if (elegido == null) return;
     if (!mounted) return;
 
-    final config = await _configurarMatricula(context,
-        profesoresDeLaAsignatura: profesores, plusesDisponibles: pluses);
-    if (config == null) return;
-
-    try {
-      await _db.matricular(
-        alumnoId: elegido.uid,
-        asignaturaId: widget.asignatura.id!,
-        cursoId: widget.asignatura.cursoId,
-        cursoEscolar: cursoEscolar,
-        diasSemana: config.dias,
-        profesorId: config.profesorId,
-        plusOrquestaId: config.plusOrquestaId,
-        horaInicio: config.horaInicio,
-        horaFin: config.horaFin,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('No se pudo matricular: $e')));
-    }
+    await configurarYMatricular(context, alumno: elegido, asignatura: _asignatura);
   }
 
   Future<void> _editarMatricula(Matricula matricula) async {
@@ -309,48 +399,162 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
       plusOrquestaIdInicial: matricula.plusOrquestaId,
       horaInicioInicial: matricula.horaInicio,
       horaFinInicial: matricula.horaFin,
+      franjasDisponibles: _franjasDisponibles,
+      franjaHorarioIdInicial: matricula.franjaHorarioId,
     );
     if (config == null) return;
     try {
       await _db.actualizarDiasClaseMatricula(
         alumnoId: matricula.alumnoId,
-        asignaturaId: widget.asignatura.id!,
+        asignaturaId: _asignatura.id!,
         cursoEscolar: matricula.cursoEscolar,
         diasSemana: config.dias,
       );
       await _db.actualizarProfesorMatricula(
         alumnoId: matricula.alumnoId,
-        asignaturaId: widget.asignatura.id!,
+        asignaturaId: _asignatura.id!,
         cursoEscolar: matricula.cursoEscolar,
         profesorId: config.profesorId,
       );
       await _db.actualizarPlusOrquestaMatricula(
         alumnoId: matricula.alumnoId,
-        asignaturaId: widget.asignatura.id!,
+        asignaturaId: _asignatura.id!,
         cursoEscolar: matricula.cursoEscolar,
         plusOrquestaId: config.plusOrquestaId,
       );
       await _db.actualizarHorarioMatricula(
         alumnoId: matricula.alumnoId,
-        asignaturaId: widget.asignatura.id!,
+        asignaturaId: _asignatura.id!,
         cursoEscolar: matricula.cursoEscolar,
         horaInicio: config.horaInicio,
         horaFin: config.horaFin,
       );
+      await _db.actualizarFranjaHorarioIdMatricula(
+        alumnoId: matricula.alumnoId,
+        asignaturaId: _asignatura.id!,
+        cursoEscolar: matricula.cursoEscolar,
+        franjaHorarioId: config.franjaHorarioId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Matrícula actualizada.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('No se pudo actualizar la matrícula: $e')));
+          .showSnackBar(const SnackBar(content: Text('No se pudo actualizar la matrícula. Inténtalo de nuevo.')));
+    }
+  }
+
+  /// Aplica una franja horaria a varios alumnos YA matriculados de
+  /// golpe — necesario porque crear/editar una franja en la asignatura
+  /// no vincula sola a quien ya estaba matriculado de antes (ver
+  /// CLAUDE.md); sin esto, tocaría editar matrícula por matrícula, que
+  /// es justo lo que las franjas de grupo querían evitar.
+  Future<void> _asignarFranjaEnBloque() async {
+    final cursoEscolar = await _db.cursoEscolarActivo().first;
+    final matriculas = await _db
+        .matriculasDeAsignatura(_asignatura.id!, cursoEscolar: cursoEscolar)
+        .first;
+    if (!mounted) return;
+    if (matriculas.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Todavía no hay alumnos matriculados.')));
+      return;
+    }
+
+    final alumnoPorId = <String, Usuario>{};
+    for (final m in matriculas) {
+      final u = await _db.obtenerUsuario(m.alumnoId);
+      if (u != null) alumnoPorId[m.alumnoId] = u;
+    }
+    if (!mounted) return;
+
+    String? franjaId = _franjasDisponibles.first.id;
+    final seleccionados = matriculas.map((m) => m.alumnoId).toSet();
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          title: const Text('Asignar franja horaria en bloque'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: franjaId,
+                  decoration: const InputDecoration(labelText: 'Franja horaria'),
+                  items: _franjasDisponibles
+                      .map((f) => DropdownMenuItem(
+                            value: f.id,
+                            child: Text(
+                                '${f.diasSemana.map((d) => nombresDiasSemana[d - 1]).join(', ')} · ${f.horaInicio} - ${f.horaFin}'),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setStateDialog(() => franjaId = v),
+                ),
+                const SizedBox(height: 12),
+                const Text('Alumnos a los que se aplica'),
+                ...matriculas.map((m) {
+                  final nombre = alumnoPorId[m.alumnoId]?.nombre ?? m.alumnoId;
+                  return CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(nombre),
+                    value: seleccionados.contains(m.alumnoId),
+                    onChanged: (v) => setStateDialog(() {
+                      v == true ? seleccionados.add(m.alumnoId) : seleccionados.remove(m.alumnoId);
+                    }),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+              onPressed: seleccionados.isEmpty || franjaId == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmado != true || franjaId == null) return;
+    final franja = _franjasDisponibles.firstWhere((f) => f.id == franjaId);
+    try {
+      await _db.asignarFranjaAMatriculas(
+        asignaturaId: _asignatura.id!,
+        cursoEscolar: cursoEscolar,
+        alumnoIds: seleccionados.toList(),
+        franja: franja,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Grupo asignado a ${seleccionados.length == 1 ? '1 alumno' : '${seleccionados.length} alumnos'}.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo aplicar el grupo.'))));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final asignatura = widget.asignatura;
+    final asignatura = _asignatura;
 
     return StreamBuilder<String>(
       stream: _db.cursoEscolarActivo(),
       builder: (context, snapActivo) {
+        if (snapActivo.hasError) {
+          return const Scaffold(body: ErrorCarga());
+        }
         if (!snapActivo.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
@@ -408,30 +612,64 @@ class _AsignaturaDetalleScreenState extends State<AsignaturaDetalleScreen> {
                   ),
                 ),
               ],
-              if (widget.perfil.esDireccion) ...[
-                IconButton(
-                  icon: const Icon(Icons.rule_outlined),
-                  tooltip: 'Criterios de evaluación',
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          CriteriosEvaluacionScreen(asignatura: asignatura),
+              // Acciones de dirección en un menú CON TEXTO, no como
+              // iconos sueltos: en el móvil el tooltip de un icono solo
+              // aparece manteniendo pulsado, y dirección no lo descubría.
+              if (widget.perfil.esDireccion)
+                PopupMenuButton<String>(
+                  tooltip: 'Más opciones',
+                  onSelected: (opcion) async {
+                    switch (opcion) {
+                      case 'editar':
+                        final guardado = await editarAsignatura(context, asignatura);
+                        if (!guardado) return;
+                        final recargada = await _db.asignatura(asignatura.id!);
+                        if (recargada != null && mounted) setState(() => _asignatura = recargada);
+                      case 'criterios':
+                        if (!context.mounted) return;
+                        Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => CriteriosEvaluacionScreen(asignatura: asignatura)));
+                      case 'sustituciones':
+                        if (!context.mounted) return;
+                        Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => SustitucionesScreen(asignatura: asignatura)));
+                      case 'grupos':
+                        _asignarFranjaEnBloque();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'editar',
+                      child: ListTile(
+                        leading: Icon(Icons.edit_outlined),
+                        title: Text('Editar asignatura'),
+                        subtitle: Text('Nombre, horas de estudio, grupos, profesorado'),
+                      ),
                     ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.swap_horiz),
-                  tooltip: 'Sustituciones',
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          SustitucionesScreen(asignatura: asignatura),
+                    const PopupMenuItem(
+                      value: 'criterios',
+                      child: ListTile(
+                        leading: Icon(Icons.rule_outlined),
+                        title: Text('Criterios de evaluación'),
+                      ),
                     ),
-                  ),
+                    const PopupMenuItem(
+                      value: 'sustituciones',
+                      child: ListTile(
+                        leading: Icon(Icons.swap_horiz),
+                        title: Text('Sustituciones'),
+                      ),
+                    ),
+                    if (_franjasDisponibles.isNotEmpty)
+                      const PopupMenuItem(
+                        value: 'grupos',
+                        child: ListTile(
+                          leading: Icon(Icons.group_work_outlined),
+                          title: Text('Asignar grupo a varios alumnos'),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
             ],
           ),
           body: _cargandoSustitucion
@@ -536,6 +774,9 @@ class _ListaMatriculasPorProfesor extends StatelessWidget {
         Future.wait(idsAlumno.map((id) => db.obtenerUsuario(id))),
       ]).then((r) => (profesores: r[0], alumnos: r[1])),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const ErrorCarga();
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -674,21 +915,63 @@ class _FilaMatriculaState extends State<_FilaMatricula> {
   }
 
   Future<void> _marcar(bool asistio, {bool retraso = false}) async {
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _marcando = true);
-    await widget.db.marcarAsistencia(
-      alumnoId: widget.matricula.alumnoId,
-      asignaturaId: widget.asignatura.id!,
-      fecha: DateTime.now(),
-      asistio: asistio,
-      retraso: retraso,
-      marcadaPor: widget.perfil.uid,
-    );
-    // No hace falta releer aquí: el StreamSubscription de arriba
-    // recibirá la actualización y refrescará _asistenciaHoy solo.
-    if (!mounted) return;
-    setState(() => _marcando = false);
+    try {
+      await widget.db.marcarAsistencia(
+        alumnoId: widget.matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        fecha: DateTime.now(),
+        asistio: asistio,
+        retraso: retraso,
+        marcadaPor: widget.perfil.uid,
+      );
+      // No hace falta releer aquí: el StreamSubscription de arriba
+      // recibirá la actualización y refrescará _asistenciaHoy solo.
+    } catch (e) {
+      messenger.showSnackBar(
+          SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo marcar la asistencia.'))));
+    } finally {
+      if (mounted) setState(() => _marcando = false);
+    }
   }
 
+  Future<void> _darDeBaja() async {
+    final nombre = _alumno?.nombre ?? 'este alumno';
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Dar de baja de la asignatura'),
+        content: Text(
+            '¿Dar de baja a $nombre de ${widget.asignatura.nombre}?\n\n'
+            'Dejará de aparecer en la lista y en el horario. Sus notas, asistencias '
+            'y horas de estudio se conservan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Dar de baja'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.db.desmatricular(
+        alumnoId: widget.matricula.alumnoId,
+        asignaturaId: widget.asignatura.id!,
+        cursoEscolar: widget.matricula.cursoEscolar,
+      );
+      messenger.showSnackBar(SnackBar(content: Text('$nombre dado de baja de ${widget.asignatura.nombre}.')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('No se pudo dar de baja. Inténtalo de nuevo.')));
+    }
+  }
+
+  // Mismo estilo que FilaAsistenciaHoy: texto además de color (no solo
+  // un icono coloreado) y al menos 40 px de alto.
   Widget _botonAsistencia({
     required IconData icon,
     required String tooltip,
@@ -696,22 +979,19 @@ class _FilaMatriculaState extends State<_FilaMatricula> {
     required Color color,
     required VoidCallback onPressed,
   }) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onPressed,
-        child: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: activo ? color.withValues(alpha: 0.2) : Colors.transparent,
-            border: Border.all(color: activo ? color : Colors.grey.shade400),
-          ),
-          child: Icon(icon,
-              size: 20, color: activo ? color : Colors.grey.shade600),
-        ),
+    final tono = color is MaterialColor ? color.shade700 : color;
+    return OutlinedButton.icon(
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
+        visualDensity: VisualDensity.compact,
+        foregroundColor: WidgetStatePropertyAll(activo ? Colors.white : tono),
+        backgroundColor: WidgetStatePropertyAll(activo ? tono : Colors.transparent),
+        side: WidgetStatePropertyAll(BorderSide(color: tono)),
       ),
+      onPressed: onPressed,
+      icon: Icon(activo ? Icons.check : icon, size: 18),
+      label: Text(tooltip),
     );
   }
 
@@ -752,6 +1032,7 @@ class _FilaMatriculaState extends State<_FilaMatricula> {
                   )
                 : Wrap(
                     spacing: 6,
+                    runSpacing: 6,
                     children: [
                       _botonAsistencia(
                         icon: Icons.check_circle_outline,
@@ -786,10 +1067,28 @@ class _FilaMatriculaState extends State<_FilaMatricula> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (widget.perfil.esDireccion && !widget.soloLectura)
-            IconButton(
-              icon: const Icon(Icons.edit_calendar_outlined),
-              tooltip: 'Editar matrícula',
-              onPressed: widget.onEditarMatricula,
+            PopupMenuButton<String>(
+              tooltip: 'Opciones del alumno',
+              onSelected: (opcion) {
+                if (opcion == 'editar') widget.onEditarMatricula();
+                if (opcion == 'baja') _darDeBaja();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'editar',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_calendar_outlined),
+                    title: Text('Cambiar horario, grupo o profesor'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'baja',
+                  child: ListTile(
+                    leading: Icon(Icons.person_remove_outlined, color: Colors.red),
+                    title: Text('Dar de baja de esta asignatura'),
+                  ),
+                ),
+              ],
             ),
           const Icon(Icons.chevron_right),
         ],
@@ -808,6 +1107,62 @@ class _FilaMatriculaState extends State<_FilaMatricula> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Elegir a quién matricular, con buscador: con muchos alumnos una
+/// lista sin búsqueda era impracticable.
+class _DialogoElegirAlumno extends StatefulWidget {
+  final List<Usuario> alumnos;
+  final String Function(Usuario) etiqueta;
+
+  const _DialogoElegirAlumno({required this.alumnos, required this.etiqueta});
+
+  @override
+  State<_DialogoElegirAlumno> createState() => _DialogoElegirAlumnoState();
+}
+
+class _DialogoElegirAlumnoState extends State<_DialogoElegirAlumno> {
+  String _busqueda = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtrados = filtrarUsuarios(widget.alumnos, _busqueda);
+    return AlertDialog(
+      title: const Text('Matricular alumno'),
+      contentPadding: const EdgeInsets.only(top: 8),
+      content: SizedBox(
+        width: 420,
+        height: 420,
+        child: Column(
+          children: [
+            CampoBusqueda(
+              hint: 'Buscar por nombre o apellidos',
+              autofocus: true,
+              onChanged: (v) => setState(() => _busqueda = v),
+            ),
+            Expanded(
+              child: filtrados.isEmpty
+                  ? const Center(child: Text('Ningún alumno coincide.'))
+                  : ListView.builder(
+                      itemCount: filtrados.length,
+                      itemBuilder: (context, i) => ListTile(
+                        leading: const Icon(Icons.person_outline),
+                        title: Text(widget.etiqueta(filtrados[i])),
+                        subtitle: filtrados[i].instrumento?.isNotEmpty ?? false
+                            ? Text(filtrados[i].instrumento!)
+                            : null,
+                        onTap: () => Navigator.pop(context, filtrados[i]),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+      ],
     );
   }
 }

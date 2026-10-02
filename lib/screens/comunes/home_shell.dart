@@ -8,6 +8,7 @@ import '../../services/tema_service.dart';
 import '../../services/ajustes_service.dart';
 import '../../services/exportacion_automatica_marcajes_service.dart';
 import '../../widgets/logo_oh.dart';
+import '../../widgets/asistente_chat.dart';
 import '../direccion/cursos_screen.dart';
 import 'alumnos_screen.dart';
 import '../direccion/profesorado_screen.dart';
@@ -32,6 +33,7 @@ import 'fichajes_screen.dart';
 import 'ajustes_screen.dart';
 import 'reportar_incidencia_screen.dart';
 import 'gestionar_incidencias_screen.dart';
+import 'ayuda_screen.dart';
 import '../../services/vista_prueba_service.dart';
 
 /// Punto de entrada tras el login: menú lateral construido según los
@@ -61,7 +63,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
-    _cuerpo = InicioScreen(perfil: widget.perfil);
+    _cuerpo = InicioScreen(perfil: widget.perfil, irA: _abrirSeccion);
     _tituloActual = 'Haro Estudis Musicals';
     if (widget.perfil.esDireccion) {
       // Best-effort: si falla (carpeta no configurada, sin permisos de
@@ -74,6 +76,10 @@ class _HomeShellState extends State<HomeShell> {
 
   void _navegarA(String titulo, Widget pantalla) {
     Navigator.pop(context); // cierra el drawer
+    _abrirSeccion(titulo, pantalla);
+  }
+
+  void _abrirSeccion(String titulo, Widget pantalla) {
     setState(() {
       _tituloActual = titulo;
       _cuerpo = pantalla;
@@ -155,6 +161,24 @@ class _HomeShellState extends State<HomeShell> {
     final perfil = widget.perfil;
     final l10n = AppLocalizations.of(context)!;
 
+    // El asistente de Claude (ver CLAUDE.md) se superpone en un Stack
+    // por encima de TODO el Scaffold, incluido el FAB propio de la
+    // pantalla activa si lo tiene (p. ej. "Nuevo alumno") — así se
+    // garantiza que quede siempre visible encima, sin que un Scaffold
+    // anidado dentro de _cuerpo se lo lleve por delante. Solo
+    // dirección, que es quien puede efectuar gestiones del centro.
+    return Stack(
+      children: [
+        _cuerpoConAppBar(context, perfil, l10n),
+        // Oculto mientras no haya servidor configurado en Ajustes: un
+        // botón siempre visible que no hace nada parece la app rota.
+        if (perfil.esDireccion && context.watch<AjustesService>().asistenteUrl.isNotEmpty)
+          const BotonAsistente(),
+      ],
+    );
+  }
+
+  Widget _cuerpoConAppBar(BuildContext context, Usuario perfil, AppLocalizations l10n) {
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -190,6 +214,12 @@ class _HomeShellState extends State<HomeShell> {
                   ],
                 ),
               ),
+              ListTile(
+                leading: const Icon(Icons.home_outlined),
+                title: Text(l10n.menuInicio),
+                onTap: () => _navegarA('Haro Estudis Musicals', InicioScreen(perfil: perfil, irA: _abrirSeccion)),
+              ),
+              const Divider(),
               if (widget.perfilReal.esDesarrollador) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -211,27 +241,20 @@ class _HomeShellState extends State<HomeShell> {
                 const Divider(),
               ],
               if (perfil.esDireccion) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(l10n.menuGestionCentro, style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
                 ListTile(
                   leading: const Icon(Icons.people_outline),
                   title: Text(l10n.menuAlumnos),
                   onTap: () => _navegarA(l10n.menuAlumnos, AlumnosScreen(perfil: perfil)),
-                ),
-              ],
-              if (perfil.esDireccion) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text(l10n.menuGestionCentro, style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 ListTile(
                   leading: const Icon(Icons.school_outlined),
                   title: Text(l10n.menuCursosAsignaturas),
                   onTap: () =>
                       _navegarA(l10n.menuCursosAsignaturas, AsignaturasPorNombreScreen(perfil: perfil)),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.event_note_outlined),
-                  title: Text(l10n.menuGestionarCursos),
-                  onTap: () => _navegarA(l10n.menuGestionarCursos, CursosScreen(perfil: perfil)),
                 ),
                 ListTile(
                   leading: const Icon(Icons.co_present_outlined),
@@ -254,30 +277,43 @@ class _HomeShellState extends State<HomeShell> {
                   onTap: () => _navegarA(l10n.menuInformeHorasTitulo, InformeDireccionScreen()),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.punch_clock_outlined),
-                  title: Text(l10n.menuRegistroHorario),
-                  onTap: () => _navegarA(l10n.menuRegistroHorario, const RegistroHorarioScreen()),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.event_repeat_outlined),
-                  title: Text(l10n.menuCursoEscolar),
-                  onTap: () => _navegarA(l10n.menuCursoEscolar, const CursoEscolarScreen()),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.upload_file_outlined),
-                  title: Text(l10n.menuImportarDatos),
-                  onTap: () => _navegarA(l10n.menuImportarDatos, const ImportarDatosScreen()),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.add_circle_outline),
-                  title: Text(l10n.menuPlusesOrquesta),
-                  onTap: () => _navegarA(l10n.menuPlusesOrquesta, const PlusesOrquestaScreen()),
-                ),
-                ListTile(
                   leading: const Icon(Icons.calendar_view_week_outlined),
                   title: Text(l10n.menuHorarioGeneral),
                   onTap: () =>
                       _navegarA(l10n.menuHorarioGeneral, HorarioGeneralScreen(perfil: perfil)),
+                ),
+                // Lo que se usa pocas veces al año, plegado para que el
+                // menú del día a día sea corto (auditoría de usabilidad).
+                ExpansionTile(
+                  leading: const Icon(Icons.settings_applications_outlined),
+                  title: Text(l10n.menuConfiguracionCentro),
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.event_note_outlined),
+                      title: Text(l10n.menuGestionarCursos),
+                      onTap: () => _navegarA(l10n.menuGestionarCursos, CursosScreen(perfil: perfil)),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.punch_clock_outlined),
+                      title: Text(l10n.menuRegistroHorario),
+                      onTap: () => _navegarA(l10n.menuRegistroHorario, const RegistroHorarioScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.event_repeat_outlined),
+                      title: Text(l10n.menuCursoEscolar),
+                      onTap: () => _navegarA(l10n.menuCursoEscolar, const CursoEscolarScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.add_circle_outline),
+                      title: Text(l10n.menuPlusesOrquesta),
+                      onTap: () => _navegarA(l10n.menuPlusesOrquesta, const PlusesOrquestaScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.upload_file_outlined),
+                      title: Text(l10n.menuImportarDatos),
+                      onTap: () => _navegarA(l10n.menuImportarDatos, const ImportarDatosScreen()),
+                    ),
+                  ],
                 ),
                 const Divider(),
               ],
@@ -361,6 +397,14 @@ class _HomeShellState extends State<HomeShell> {
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) => CuadroDeHonorScreen(perfil: perfil)));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.help_outline),
+                title: Text(l10n.menuAyuda),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => AyudaScreen(perfil: perfil)));
                 },
               ),
               ListTile(

@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../utils/mensaje_error.dart';
+import '../../models/usuario.dart';
 import '../../services/auth_service.dart';
+import '../../services/db_service.dart';
+import 'alumno_perfil_screen.dart';
 
 class CrearAlumnoScreen extends StatefulWidget {
-  const CrearAlumnoScreen({super.key});
+  final Usuario perfil;
+
+  const CrearAlumnoScreen({super.key, required this.perfil});
 
   @override
   State<CrearAlumnoScreen> createState() => _CrearAlumnoScreenState();
@@ -37,6 +43,7 @@ class _CrearAlumnoScreenState extends State<CrearAlumnoScreen> {
       _error = null;
     });
     try {
+      String? nuevoUid;
       if (_tieneCuenta) {
         final password = await _authService.crearAlumno(
           nombre: _nombreCtrl.text.trim(),
@@ -46,19 +53,52 @@ class _CrearAlumnoScreenState extends State<CrearAlumnoScreen> {
         );
         if (!mounted) return;
         await _mostrarPasswordGenerada(password);
+        nuevoUid = (await DbService().obtenerUsuarioPorEmail(_emailCtrl.text.trim()))?.uid;
       } else {
-        await _authService.crearAlumnoSinCuenta(
+        nuevoUid = await _authService.crearAlumnoSinCuenta(
           nombre: _nombreCtrl.text.trim(),
           apellidos: _apellidosCtrl.text.trim().isEmpty ? null : _apellidosCtrl.text.trim(),
           instrumento: _instrumentoCtrl.text.trim().isEmpty ? null : _instrumentoCtrl.text.trim(),
         );
       }
       if (!mounted) return;
-      Navigator.pop(context);
+      await _ofrecerMatricular(nuevoUid);
     } catch (e) {
-      setState(() => _error = 'No se pudo crear el alumno: $e');
+      setState(() => _error = mensajeError(e, porDefecto: 'No se pudo crear el alumno. Inténtalo de nuevo.'));
     } finally {
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  /// Tras el alta, lo natural es matricularlo: se ofrece ir directo a
+  /// su ficha (donde está "Matricular en una asignatura").
+  Future<void> _ofrecerMatricular(String? uid) async {
+    final alumno = uid == null ? null : await DbService().obtenerUsuario(uid);
+    if (!mounted) return;
+    if (alumno == null) {
+      Navigator.pop(context);
+      return;
+    }
+    final matricular = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('${alumno.nombre} ya está dado de alta'),
+        content: const Text('¿Quieres matricularlo ahora en sus asignaturas?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Más tarde')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Matricular ahora')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (matricular == true) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => AlumnoPerfilScreen(alumno: alumno, perfil: widget.perfil)),
+      );
+    } else {
+      Navigator.pop(context);
     }
   }
 

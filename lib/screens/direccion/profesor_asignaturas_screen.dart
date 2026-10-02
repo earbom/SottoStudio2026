@@ -3,6 +3,10 @@ import '../../models/asignatura.dart';
 import '../../models/curso.dart';
 import '../../models/usuario.dart';
 import '../../services/db_service.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
+import '../../widgets/acciones_usuario.dart';
+import 'sustitucion_profesor_screen.dart';
 
 /// Permite a dirección asignar/desasignar un profesor a varias
 /// asignaturas (una asignatura puede tener más de un profesor).
@@ -15,10 +19,26 @@ class ProfesorAsignaturasScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final db = DbService();
     return Scaffold(
-      appBar: AppBar(title: Text('Asignaturas de ${profesor.nombre}')),
+      appBar: AppBar(
+        title: Text('Asignaturas de ${profesor.nombre}'),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => SustitucionProfesorScreen(profesor: profesor)),
+            ),
+            icon: const Icon(Icons.swap_horiz),
+            label: const Text('Sustituir'),
+          ),
+          MenuAccionesUsuario(usuario: profesor, esAlumno: false),
+        ],
+      ),
       body: StreamBuilder<List<Curso>>(
         stream: db.cursos(),
         builder: (context, snapCursos) {
+          if (snapCursos.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapCursos.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -27,6 +47,9 @@ class ProfesorAsignaturasScreen extends StatelessWidget {
           return StreamBuilder<List<Asignatura>>(
             stream: db.todasLasAsignaturas(),
             builder: (context, snapAsignaturas) {
+              if (snapAsignaturas.hasError) {
+                return const ErrorCarga();
+              }
               if (!snapAsignaturas.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -64,7 +87,7 @@ class ProfesorAsignaturasScreen extends StatelessWidget {
                               } catch (e) {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('No se pudo actualizar: $e')),
+                                  SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo actualizar.'))),
                                 );
                               }
                             },

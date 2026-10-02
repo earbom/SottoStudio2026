@@ -21,8 +21,27 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
+    // Una cuenta dada de baja por dirección (`activo == false`) pierde
+    // TODOS sus permisos de rol, aunque siga existiendo en Firebase
+    // Auth — ver Usuario.activo / DbService.darDeBajaUsuario. Las
+    // cuentas antiguas sin el campo cuentan como activas.
     function tienePermiso(permiso) {
-      return estaAutenticado() && permiso in usuarioActual().permisos;
+      return estaAutenticado()
+          && usuarioActual().get('activo', true) != false
+          && permiso in usuarioActual().permisos;
+    }
+
+    // Fecha de hoy en 'yyyy-MM-dd' (UTC) — para comprobar una
+    // sustitución "de hoy" en lecturas donde el documento no lleva la
+    // fecha (p. ej. la lista de matrículas que necesita un sustituto).
+    // Al ser UTC, entre las 00:00 y las 01:00/02:00 hora peninsular
+    // todavía cuenta como el día anterior: aceptable, no hay clases.
+    function hoy() {
+      let m = request.time.month();
+      let d = request.time.day();
+      return string(request.time.year()) + '-'
+          + (m < 10 ? '0' : '') + string(m) + '-'
+          + (d < 10 ? '0' : '') + string(d);
     }
 
     function esAlumno() {
@@ -117,8 +136,11 @@ service cloud.firestore {
       allow create: if (esPropioUsuario(uid) && request.resource.data.permisos == ['alumno'])
                     || esDireccion();
 
+      // El propio usuario no puede tocar sus permisos ni reactivarse
+      // si dirección le dio de baja.
       allow update: if (esPropioUsuario(uid)
-                        && request.resource.data.permisos == resource.data.permisos)
+                        && request.resource.data.permisos == resource.data.permisos
+                        && request.resource.data.get('activo', true) == resource.data.get('activo', true))
                     || esDireccion();
 
       allow delete: if esDireccion();
@@ -257,13 +279,26 @@ service cloud.firestore {
                     && (esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId)
                         || tieneSustitucion(request.resource.data.asignaturaId, request.resource.data.fechaDia));
 
+      // El profesor que la puso puede corregirla mientras siga
+      // pendiente de validar, pero solo valor/comentario: no puede
+      // cambiar de alumno, asignatura, criterio ni validarla él mismo.
       allow update: if esDireccion()
                     || (esProfesor()
                         && resource.data.profesorId == request.auth.uid
                         && resource.data.estado == 'pendiente'
+                        && request.resource.data.estado == 'pendiente'
+                        && request.resource.data.profesorId == resource.data.profesorId
+                        && request.resource.data.alumnoId == resource.data.alumnoId
+                        && request.resource.data.asignaturaId == resource.data.asignaturaId
+                        && request.resource.data.criterioId == resource.data.criterioId
                         && request.resource.data.valor >= 0 && request.resource.data.valor <= 10);
 
-      allow delete: if esDireccion();
+      // Borrar una nota puesta por error: dirección, o su autor mientras
+      // siga pendiente.
+      allow delete: if esDireccion()
+                    || (esProfesor()
+                        && resource.data.profesorId == request.auth.uid
+                        && resource.data.estado == 'pendiente');
     }
 
     // ---------------------------------------------------------------
@@ -298,13 +333,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     match /cursos/{cursoId} {
       allow read: if estaAutenticado();
-      // get(..., 0) en vez de acceso directo: el objetivo de horas vivía
-      // antes en asignaturas y se ha movido aquí (ver CLAUDE.md) — los
-      // cursos creados antes de ese cambio no tienen el campo, y
-      // acceder directo lanzaría un error de evaluación
-      // (permission-denied) al editarlos por primera vez tras el cambio.
-      allow create, update: if esDireccion()
-                            && request.resource.data.get('horasObjetivoMensual', 0) >= 0;
+      allow create, update: if esDireccion();
       allow delete: if esDireccion();
     }
 
@@ -358,14 +387,14 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     // plusesOrquesta
     // Catálogo de pluses de horas por orquesta (p.ej. "Orquesta de
-    // guitarras" suma horas/semana a "Guitarra"), gestionado por
+    // guitarras" suma minutos/semana a "Guitarra"), gestionado por
     // dirección — se elige uno al matricular (ver
     // Matricula.plusOrquestaId). Lectura abierta: cualquier profesor
     // que edite una matrícula necesita ver el catálogo para elegir.
     // ---------------------------------------------------------------
     match /plusesOrquesta/{plusId} {
       allow read: if estaAutenticado();
-      allow create, update: if esDireccion() && request.resource.data.horasSemana >= 0;
+      allow create, update: if esDireccion() && request.resource.data.minutosSemana >= 0;
       allow delete: if esDireccion();
     }
 
@@ -383,7 +412,10 @@ service cloud.firestore {
       allow read: if esDireccion()
                   || (estaAutenticado() && resource == null)
                   || (esAlumno() && resource.data.alumnoId == request.auth.uid)
-                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId);
+                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId)
+                  // Un sustituto necesita ver la lista de alumnos el día
+                  // que cubre, aunque no dé esa asignatura normalmente.
+                  || tieneSustitucion(resource.data.asignaturaId, hoy());
       allow create, update, delete: if esDireccion();
     }
 
@@ -401,7 +433,8 @@ service cloud.firestore {
       allow read: if esDireccion()
                   || (estaAutenticado() && resource == null)
                   || (esAlumno() && resource.data.alumnoId == request.auth.uid)
-                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId);
+                  || esProfesorDeAsignaturaPorNombre(resource.data.asignaturaId)
+                  || tieneSustitucion(resource.data.asignaturaId, resource.data.fecha);
 
       allow create: if esDireccion()
                     || esProfesorDeAsignaturaPorNombre(request.resource.data.asignaturaId)
@@ -423,6 +456,18 @@ service cloud.firestore {
     // Concede a un profesor acceso temporal a TODOS los alumnos de una
     // asignatura para un día concreto (cubre bajas/sustituciones). Solo
     // dirección las crea/edita/elimina, desde la ficha de la asignatura.
+    // ---------------------------------------------------------------
+    // contactosAlumno
+    // Contacto de la familia de un alumno (tutor legal, teléfonos). Datos
+    // personales de menores: SOLO dirección, ni profesores ni el propio
+    // alumno (mínimo privilegio — por eso no van en `usuarios`, que
+    // cualquier profesor puede leer). Nunca se borra desde la app.
+    // ---------------------------------------------------------------
+    match /contactosAlumno/{alumnoId} {
+      allow read, create, update: if esDireccion();
+      allow delete: if false;
+    }
+
     // ---------------------------------------------------------------
     match /sustituciones/{sustitucionId} {
       allow read: if estaAutenticado();

@@ -9,6 +9,7 @@ import '../../services/ajustes_service.dart';
 import '../../services/db_service.dart';
 import '../../utils/iconos_asignatura.dart';
 import 'asignatura_detalle_screen.dart';
+import '../../widgets/error_carga.dart';
 import 'secciones_asignatura_screen.dart';
 
 /// Cursos que ofrecen una asignatura con el nombre elegido en
@@ -40,6 +41,9 @@ class AsignaturaNombreCursosScreen extends StatelessWidget {
       body: StreamBuilder<String>(
         stream: db.cursoEscolarActivo(),
         builder: (context, snapActivo) {
+          if (snapActivo.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapActivo.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -109,8 +113,8 @@ class AsignaturaNombreCursosScreen extends StatelessWidget {
                                 style: const TextStyle(fontWeight: FontWeight.w600),
                               ),
                               Text(
-                                '$nMatriculados alumno(s)',
-                                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
+                                '$nMatriculados ${nMatriculados == 1 ? 'alumno' : 'alumnos'}',
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.outline),
                               ),
                             ],
                           ),
@@ -140,7 +144,7 @@ class AsignaturaNombreCursosScreen extends StatelessWidget {
                       return ListTile(
                         leading: const Icon(Icons.school_outlined),
                         title: Text(curso?.nombre ?? 'Cargando…'),
-                        subtitle: Text('$nMatriculados alumno(s)'),
+                        subtitle: Text('$nMatriculados ${nMatriculados == 1 ? 'alumno' : 'alumnos'}'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => abrir(asignatura),
                       );

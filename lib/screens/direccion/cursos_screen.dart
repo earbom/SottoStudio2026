@@ -8,6 +8,8 @@ import '../../services/ajustes_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/db_service.dart';
 import '../../utils/iconos_asignatura.dart';
+import '../../utils/mensaje_error.dart';
+import '../../widgets/error_carga.dart';
 import 'curso_detalle_screen.dart';
 
 class CursosScreen extends StatefulWidget {
@@ -59,7 +61,6 @@ class _CursosScreenState extends State<CursosScreen> {
         NivelCurso nivel,
         int? numeroCurso,
         String iconoId,
-        double horasObjetivoMensual,
       })?> _mostrarFormularioCurso({
     required List<Curso> cursosExistentes,
     String? idExcluido,
@@ -68,15 +69,10 @@ class _CursosScreenState extends State<CursosScreen> {
     NivelCurso nivelInicial = NivelCurso.sensibilizacion,
     int? numeroCursoInicial,
     String iconoIdInicial = '',
-    double horasObjetivoMensualInicial = 0,
   }) async {
     final controladorNombre = TextEditingController(text: nombreInicial);
     final controladorDescripcion =
         TextEditingController(text: descripcionInicial ?? '');
-    final controladorObjetivo = TextEditingController(
-        text: horasObjetivoMensualInicial == 0
-            ? ''
-            : horasObjetivoMensualInicial.toString());
     var nivel = nivelInicial;
     var numeroCurso = numeroCursoInicial;
     var iconoId =
@@ -92,7 +88,6 @@ class _CursosScreenState extends State<CursosScreen> {
           NivelCurso nivel,
           int? numeroCurso,
           String iconoId,
-          double horasObjetivoMensual,
         })>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -162,15 +157,6 @@ class _CursosScreenState extends State<CursosScreen> {
                     controller: controladorDescripcion,
                     decoration: const InputDecoration(
                         labelText: 'Descripción (opcional)'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: controladorObjetivo,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                        labelText:
-                            'Objetivo de horas efectivas al mes (0 = sin objetivo)'),
                   ),
                   const SizedBox(height: 16),
                   const Text('Icono'),
@@ -253,11 +239,6 @@ class _CursosScreenState extends State<CursosScreen> {
                       nivel: nivel,
                       numeroCurso: numeroCurso,
                       iconoId: iconoId,
-                      horasObjetivoMensual: double.tryParse(controladorObjetivo
-                              .text
-                              .replaceAll(',', '.')
-                              .trim()) ??
-                          0,
                     ),
                   );
                 },
@@ -284,7 +265,6 @@ class _CursosScreenState extends State<CursosScreen> {
       nivel: resultado.nivel,
       numeroCurso: resultado.numeroCurso,
       iconoId: resultado.iconoId,
-      horasObjetivoMensual: resultado.horasObjetivoMensual,
       createdAt: DateTime.now(),
       createdBy: uid,
     ));
@@ -299,7 +279,6 @@ class _CursosScreenState extends State<CursosScreen> {
       nivelInicial: curso.nivel,
       numeroCursoInicial: curso.numeroCurso,
       iconoIdInicial: curso.iconoId,
-      horasObjetivoMensualInicial: curso.horasObjetivoMensual,
     );
     if (resultado == null || resultado.nombre.isEmpty) return;
 
@@ -309,7 +288,6 @@ class _CursosScreenState extends State<CursosScreen> {
       'nivel': resultado.nivel.name,
       'numeroCurso': resultado.numeroCurso,
       'iconoId': resultado.iconoId,
-      'horasObjetivoMensual': resultado.horasObjetivoMensual,
     });
   }
 
@@ -337,7 +315,7 @@ class _CursosScreenState extends State<CursosScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
+        SnackBar(content: Text(mensajeError(e, porDefecto: 'No se pudo eliminar el curso.'))),
       );
     }
   }
@@ -348,6 +326,9 @@ class _CursosScreenState extends State<CursosScreen> {
       body: StreamBuilder<List<Curso>>(
         stream: _db.cursos(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const ErrorCarga();
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -417,7 +398,7 @@ class _CursosScreenState extends State<CursosScreen> {
                             Text(
                               '$nAsignaturas asignatura(s)',
                               style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   color: Theme.of(context).colorScheme.outline),
                             ),
                           ],

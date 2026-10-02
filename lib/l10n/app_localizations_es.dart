@@ -44,6 +44,28 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo enviar el email. Comprueba la dirección.';
 
   @override
+  String get menuInicio => 'Inicio';
+
+  @override
+  String get menuConfiguracionCentro => 'Configuración del centro';
+
+  @override
+  String get menuAyuda => 'Ayuda';
+
+  @override
+  String get inicioBienvenidaTitulo => '¿Primera vez en Sotto Studio?';
+
+  @override
+  String get inicioBienvenidaTexto =>
+      'En la Ayuda tienes, paso a paso, cómo hacer cada tarea. También la encontrarás siempre en el menú (☰).';
+
+  @override
+  String get inicioBienvenidaVerAyuda => 'Ver la ayuda';
+
+  @override
+  String get inicioBienvenidaCerrar => 'Entendido';
+
+  @override
   String get menuGestionCentro => 'Gestión del centro';
 
   @override
@@ -68,7 +90,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get menuInformeHoras => 'Informe de horas';
 
   @override
-  String get menuInformeHorasTitulo => 'Informe de horas efectivas';
+  String get menuInformeHorasTitulo => 'Informe de horas de estudio';
 
   @override
   String get menuRegistroHorario => 'Registro horario';
@@ -186,7 +208,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get ajustesTamanoIconosDescripcion =>
-      'Afecta a la cuadrícula de iconos de \"Cursos y asignaturas\" y \"Mis asignaturas\".';
+      'Afecta a la cuadrícula de iconos de \"Asignaturas\" y \"Mis asignaturas\".';
 
   @override
   String get ajustesConfirmarCierreSesion => 'Confirmar antes de cerrar sesión';
@@ -221,6 +243,19 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get ajustesAsistenteTitulo => 'Asistente (Claude)';
+
+  @override
+  String get ajustesAsistenteDescripcion =>
+      'URL del servidor propio del centro que conecta el botón del asistente con la API de Claude. La clave de la API vive solo en ese servidor, nunca en esta app.';
+
+  @override
+  String get ajustesAsistenteUrlLabel => 'URL del servidor';
+
+  @override
+  String get ajustesAsistenteGuardar => 'Guardar';
+
+  @override
   String get ajustesRestablecer => 'Restablecer valores por defecto';
 
   @override
@@ -240,6 +275,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get fichajesSalida => 'Salida';
+
+  @override
+  String fichajesConfirmarHora(Object hora) {
+    return 'Se registrará a las $hora. Una vez fichado no se puede cambiar (solo dirección puede corregirlo).';
+  }
 
   @override
   String get fichajesFicharEntrada => 'Fichar entrada';
@@ -335,11 +375,49 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String grabarEstudioEfectivo(Object tiempo) {
-    return 'Efectivo: $tiempo';
+    return 'Tocando: $tiempo';
   }
 
   @override
   String grabarEstudioTotal(Object tiempo) {
-    return 'Total: $tiempo';
+    return 'Tiempo total: $tiempo';
   }
+
+  @override
+  String get grabarEstudioPulsaEmpezar =>
+      'Pulsa el micrófono para empezar a grabar tu estudio.';
+
+  @override
+  String get grabarEstudioGrabando =>
+      'Grabando… Cuando termines, pulsa el botón rojo para guardar.';
+
+  @override
+  String get grabarEstudioExplicacion =>
+      '«Tocando» solo cuenta mientras suena tu instrumento (las pausas cortas también cuentan). No se guarda nada de audio.';
+
+  @override
+  String grabarEstudioGuardada(Object minutos) {
+    return '¡Sesión guardada! Has tocado $minutos min.';
+  }
+
+  @override
+  String get grabarEstudioErrorMicro =>
+      'No se puede usar el micrófono. Dale permiso en los ajustes del móvil y vuelve a intentarlo.';
+
+  @override
+  String get grabarEstudioErrorGuardar =>
+      'No se pudo guardar la sesión. Comprueba la conexión a internet.';
+
+  @override
+  String get grabarEstudioSalirTitulo => 'Estás grabando';
+
+  @override
+  String get grabarEstudioSalirTexto =>
+      'Si sales ahora, terminamos la grabación y guardamos lo que llevas.';
+
+  @override
+  String get grabarEstudioSeguir => 'Seguir grabando';
+
+  @override
+  String get grabarEstudioGuardarYSalir => 'Guardar y salir';
 }
